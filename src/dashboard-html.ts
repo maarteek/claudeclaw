@@ -41,6 +41,48 @@ export function getDashboardHtml(token: string, chatId: string): string {
   .salience-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
   .clickable-card { cursor: pointer; transition: border-color 0.15s; }
   .clickable-card:hover, .clickable-card:active { border-color: #444; }
+  /* Info tooltips */
+  .info-tip { position: relative; display: inline-block; vertical-align: middle; margin-left: 6px; }
+  .info-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #333; color: #888; font-size: 11px; cursor: pointer; user-select: none; line-height: 1; transition: background 0.15s, color 0.15s; }
+  .info-icon:hover { background: #444; color: #bbb; }
+  .info-tooltip { position: absolute; left: 50%; transform: translateX(-50%); top: calc(100% + 8px); background: #252525; border: 1px solid #3a3a3a; color: #bbb; font-size: 12px; font-weight: 400; line-height: 1.5; padding: 10px 12px; border-radius: 8px; max-width: 280px; min-width: 200px; z-index: 30; opacity: 0; pointer-events: none; transition: opacity 0.15s; white-space: normal; text-transform: none; letter-spacing: normal; }
+  .info-tooltip::before { content: ''; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 6px solid #3a3a3a; }
+  .info-tooltip::after { content: ''; position: absolute; top: -5px; left: 50%; transform: translateX(-50%); border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 5px solid #252525; }
+  .info-tip.active .info-tooltip { opacity: 1; pointer-events: auto; }
+  /* Chat FAB */
+  .chat-fab { position: fixed; bottom: 24px; right: 24px; z-index: 60; width: 56px; height: 56px; border-radius: 50%; background: #4f46e5; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(79,70,229,0.4); transition: transform 0.15s, background 0.15s; }
+  .chat-fab:hover { transform: scale(1.08); background: #4338ca; }
+  .chat-fab:active { transform: scale(0.95); }
+  .chat-fab-badge { position: absolute; top: -2px; right: -2px; width: 18px; height: 18px; border-radius: 50%; background: #ef4444; color: #fff; font-size: 10px; font-weight: 700; display: none; align-items: center; justify-content: center; border: 2px solid #0f0f0f; }
+  /* Chat overlay */
+  .chat-overlay { position: fixed; inset: 0; z-index: 70; background: #0f0f0f; display: flex; flex-direction: column; transform: translateY(100%); transition: transform 0.3s ease; }
+  .chat-overlay.open { transform: translateY(0); }
+  .chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #141414; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+  .chat-header-title { font-size: 16px; font-weight: 700; color: #fff; }
+  .chat-status-dot { width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; display: inline-block; }
+  .chat-messages { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .chat-bubble { max-width: 85%; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.5; word-wrap: break-word; overflow-wrap: break-word; }
+  .chat-bubble-user { background: #3730a3; color: #e0e7ff; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .chat-bubble-assistant { background: #1e1e1e; color: #d4d4d8; align-self: flex-start; border-bottom-left-radius: 4px; border: 1px solid #2a2a2a; }
+  .chat-bubble-source { font-size: 10px; color: #6b7280; margin-top: 4px; }
+  .chat-bubble code { background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+  .chat-bubble pre { background: #111; padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 6px 0; font-size: 12px; }
+  .chat-bubble pre code { background: none; padding: 0; }
+  .chat-progress-bar { display: none; align-items: center; gap: 10px; padding: 10px 16px; background: #141414; border-top: 1px solid #2a2a2a; flex-shrink: 0; position: relative; overflow: hidden; }
+  .chat-progress-bar.active { display: flex; }
+  .chat-progress-pulse { width: 10px; height: 10px; border-radius: 50%; background: #4f46e5; flex-shrink: 0; animation: progressPulse 1.5s ease-in-out infinite; }
+  @keyframes progressPulse { 0%,100% { opacity: 0.4; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+  .chat-progress-label { font-size: 13px; color: #9ca3af; }
+  .chat-stop-btn { margin-left: auto; background: none; border: 1px solid #4f46e5; color: #4f46e5; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.15s, color 0.15s; }
+  .chat-stop-btn:hover { background: #4f46e5; color: #fff; }
+  .chat-progress-shimmer { position: absolute; bottom: 0; left: 0; height: 2px; width: 100%; background: linear-gradient(90deg, transparent, #4f46e5, transparent); animation: shimmer 2s ease-in-out infinite; }
+  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  .chat-input-area { display: flex; gap: 8px; padding: 12px 16px; background: #141414; border-top: 1px solid #2a2a2a; flex-shrink: 0; }
+  .chat-textarea { flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; color: #e0e0e0; padding: 10px 14px; font-size: 14px; resize: none; outline: none; max-height: 120px; font-family: inherit; }
+  .chat-textarea:focus { border-color: #4f46e5; }
+  .chat-send-btn { background: #4f46e5; color: #fff; border: none; border-radius: 12px; padding: 0 16px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.15s; flex-shrink: 0; }
+  .chat-send-btn:hover { background: #4338ca; }
+  .chat-send-btn:disabled { background: #2a2a2a; color: #666; cursor: not-allowed; }
 </style>
 </head>
 <body class="p-4 select-none">
@@ -49,7 +91,7 @@ export function getDashboardHtml(token: string, chatId: string): string {
 <div class="max-w-lg lg:max-w-6xl mx-auto">
 
 <!-- Top bar -->
-<div class="flex items-center justify-between mb-4">
+<div class="flex items-center justify-between mb-1">
   <div class="flex items-center gap-3">
     <h1 class="text-xl font-bold text-white">ClaudeClaw</h1>
     <span id="device-badge" class="device-badge"></span>
@@ -63,6 +105,7 @@ export function getDashboardHtml(token: string, chatId: string): string {
     </button>
   </div>
 </div>
+<div id="bot-info" class="flex items-center gap-3 mb-4 text-xs text-gray-500"></div>
 
 <!-- Desktop: 2-column grid. Mobile: stacked. -->
 <div class="lg:grid lg:grid-cols-2 lg:gap-6">
@@ -72,7 +115,7 @@ export function getDashboardHtml(token: string, chatId: string): string {
 
 <!-- Scheduled Tasks -->
 <div id="tasks-section">
-  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Scheduled Tasks</h2>
+  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Scheduled Tasks<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Automated tasks scheduled by the bot (e.g. reminders, checks). Shows the schedule, status, and time until next run.</span></span></h2>
   <div id="tasks-container"><div class="card text-gray-500 text-sm">Loading...</div></div>
 </div>
 
@@ -82,29 +125,29 @@ export function getDashboardHtml(token: string, chatId: string): string {
   <div class="grid grid-cols-2 gap-3 mb-3">
     <div class="card clickable-card text-center" onclick="openMemoryDrawer('semantic')">
       <div class="stat-val" id="mem-semantic">-</div>
-      <div class="stat-label">Semantic</div>
+      <div class="stat-label">Semantic<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Number of semantic memories \u2014 general knowledge and long-lasting facts retained by the bot.</span></span></div>
       <div class="text-xs text-gray-600 mt-1">Tap to browse</div>
     </div>
     <div class="card clickable-card text-center" onclick="openMemoryDrawer('episodic')">
       <div class="stat-val" id="mem-episodic">-</div>
-      <div class="stat-label">Episodic</div>
+      <div class="stat-label">Episodic<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Number of episodic memories \u2014 specific events and conversations remembered by the bot.</span></span></div>
       <div class="text-xs text-gray-600 mt-1">Tap to browse</div>
     </div>
   </div>
   <div class="card">
-    <div class="text-xs text-gray-400 mb-2">Salience Distribution</div>
+    <div class="text-xs text-gray-400 mb-2">Salience Distribution<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Distribution of memories by importance level (salience). Higher scores mean the memory is deemed more important and will be retained longer.</span></span></div>
     <canvas id="salience-chart" height="120"></canvas>
   </div>
   <div class="card">
-    <div class="text-xs text-gray-400 mb-1">Fading Soon <span class="text-gray-600">(salience &lt; 0.5)</span></div>
+    <div class="text-xs text-gray-400 mb-1">Fading Soon <span class="text-gray-600">(salience &lt; 0.5)</span><span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Memories about to fade away (importance &lt; 0.5). They will soon be forgotten by the bot unless reinforced.</span></span></div>
     <div id="fading-list" class="text-sm"></div>
   </div>
   <div class="card">
-    <div class="text-xs text-gray-400 mb-1">Most Accessed</div>
+    <div class="text-xs text-gray-400 mb-1">Most Accessed<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Memories most frequently accessed by the bot. A high score means this memory is often useful.</span></span></div>
     <div id="top-accessed-list" class="text-sm"></div>
   </div>
   <div class="card">
-    <div class="text-xs text-gray-400 mb-2">Memory Creation (30d)</div>
+    <div class="text-xs text-gray-400 mb-2">Memory Creation (30d)<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Number of new memories created per day over the last 30 days, broken down by type (semantic vs episodic).</span></span></div>
     <canvas id="memory-timeline-chart" height="140"></canvas>
   </div>
 </div>
@@ -118,7 +161,10 @@ export function getDashboardHtml(token: string, chatId: string): string {
 <div id="health-section" class="mt-5 lg:mt-0">
   <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">System Health</h2>
   <div class="card flex items-center gap-4">
-    <svg id="context-gauge" width="90" height="90" viewBox="0 0 90 90"></svg>
+    <div class="relative">
+      <svg id="context-gauge" width="90" height="90" viewBox="0 0 90 90"></svg>
+      <span class="info-tip" style="position:absolute;top:0;right:-4px;"><span class="info-icon">\u24D8</span><span class="info-tooltip">Percentage of the context window in use. The higher it is, the closer the bot is to its working memory limit.</span></span>
+    </div>
     <div class="flex-1">
       <div class="grid grid-cols-3 gap-2 text-center">
         <div>
@@ -134,17 +180,20 @@ export function getDashboardHtml(token: string, chatId: string): string {
           <div class="stat-label">Compactions</div>
         </div>
       </div>
+      <div class="text-center mt-1"><span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Turns = number of exchanges in the session. Age = session duration. Compactions = how many times context was compressed to free up space.</span></span></div>
     </div>
   </div>
   <div class="flex gap-3 mt-1">
+    <span class="pill" id="tg-pill">Telegram</span>
     <span class="pill" id="wa-pill">WhatsApp</span>
     <span class="pill" id="slack-pill">Slack</span>
+    <span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Connection status for messaging platforms (Telegram, WhatsApp, Slack). Green = connected, Red = disconnected.</span></span>
   </div>
 </div>
 
 <!-- Token / Cost -->
 <div id="token-section" class="mt-5 mb-8">
-  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Tokens &amp; Cost</h2>
+  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Tokens &amp; Cost<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Token consumption (text units processed by the AI) and associated cost in dollars. Today's totals and all-time cumulative.</span></span></h2>
   <div class="card">
     <div class="flex justify-between items-baseline">
       <div>
@@ -159,11 +208,11 @@ export function getDashboardHtml(token: string, chatId: string): string {
     <div class="mt-2 text-xs text-gray-500">All-time: <span id="token-alltime-cost">-</span> across <span id="token-alltime-turns">-</span> turns</div>
   </div>
   <div class="card">
-    <div class="text-xs text-gray-400 mb-2">Cost Timeline (30d)</div>
+    <div class="text-xs text-gray-400 mb-2">Cost Timeline (30d)<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Daily cost trend in dollars over the last 30 days.</span></span></div>
     <canvas id="cost-chart" height="140"></canvas>
   </div>
   <div class="card">
-    <div class="text-xs text-gray-400 mb-2">Cache Hit Rate</div>
+    <div class="text-xs text-gray-400 mb-2">Cache Hit Rate<span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Cache reuse rate. A high percentage means the bot is efficiently reusing previously processed data, which reduces costs.</span></span></div>
     <canvas id="cache-chart" height="140"></canvas>
   </div>
 </div>
@@ -193,8 +242,8 @@ export function getDashboardHtml(token: string, chatId: string): string {
 </div>
 
 <script>
-const TOKEN = ${JSON.stringify(token)};
-const CHAT_ID = ${JSON.stringify(chatId)};
+const TOKEN = \${JSON.stringify(token)};
+const CHAT_ID = \${JSON.stringify(chatId)};
 const BASE = location.origin;
 
 // Device detection
@@ -421,6 +470,8 @@ async function loadHealth() {
     document.getElementById('health-compactions').textContent = data.compactions;
     document.getElementById('health-age').textContent = data.sessionAge;
 
+    const tgPill = document.getElementById('tg-pill');
+    tgPill.className = 'pill ' + (data.telegramConnected ? 'pill-connected' : 'pill-disconnected');
     const waPill = document.getElementById('wa-pill');
     waPill.className = 'pill ' + (data.waConnected ? 'pill-connected' : 'pill-disconnected');
     const slackPill = document.getElementById('slack-pill');
@@ -475,10 +526,44 @@ function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+async function loadInfo() {
+  try {
+    const r = await fetch(BASE + '/api/info?token=' + TOKEN + '&chatId=' + CHAT_ID);
+    const d = await r.json();
+    const el = document.getElementById('bot-info');
+    const parts = [];
+    if (d.botName) parts.push('<span class="font-semibold text-white">' + d.botName + '</span>' + (d.botUsername ? ' <span class="text-gray-600">@' + d.botUsername + '</span>' : ''));
+    if (d.pid) parts.push('PID ' + d.pid);
+    if (d.chatId) parts.push('Chat ' + d.chatId);
+    el.innerHTML = parts.join(' <span class="text-gray-700">|</span> ');
+  } catch {}
+}
+
+// Tooltip open/close \u2014 capture phase to intercept before inline onclick handlers
+document.addEventListener('click', function(e) {
+  const icon = e.target.closest('.info-icon');
+  if (icon) {
+    e.stopPropagation();
+    e.preventDefault();
+    const tip = icon.parentElement;
+    const wasActive = tip.classList.contains('active');
+    document.querySelectorAll('.info-tip.active').forEach(t => t.classList.remove('active'));
+    if (!wasActive) tip.classList.add('active');
+    return;
+  }
+  const tooltip = e.target.closest('.info-tooltip');
+  if (tooltip) {
+    e.stopPropagation();
+    e.preventDefault();
+    return;
+  }
+  document.querySelectorAll('.info-tip.active').forEach(t => t.classList.remove('active'));
+}, true);
+
 async function refreshAll() {
   const btn = document.getElementById('refresh-btn').querySelector('svg');
   btn.classList.add('refresh-spin');
-  await Promise.all([loadTasks(), loadMemories(), loadHealth(), loadTokens()]);
+  await Promise.all([loadInfo(), loadTasks(), loadMemories(), loadHealth(), loadTokens()]);
   btn.classList.remove('refresh-spin');
   document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
 }
@@ -496,7 +581,240 @@ setInterval(refreshAll, 60000);
 
 // Initial load
 refreshAll();
+
+// \u2500\u2500 Chat \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+let chatOpen = false;
+let chatSSE = null;
+let chatHistoryLoaded = false;
+let unreadCount = 0;
+
+function openChat() {
+  chatOpen = true;
+  unreadCount = 0;
+  updateFabBadge();
+  document.getElementById('chat-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  if (!chatHistoryLoaded) loadChatHistory();
+  connectChatSSE();
+  // Focus input
+  setTimeout(() => document.getElementById('chat-input').focus(), 350);
+}
+
+function closeChat() {
+  chatOpen = false;
+  document.getElementById('chat-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function updateFabBadge() {
+  const badge = document.getElementById('chat-fab-badge');
+  if (unreadCount > 0) {
+    badge.style.display = 'flex';
+    badge.textContent = unreadCount > 9 ? '9+' : unreadCount;
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+async function loadChatHistory() {
+  if (!CHAT_ID) return;
+  try {
+    const data = await api('/api/chat/history?chatId=' + CHAT_ID + '&limit=40');
+    const container = document.getElementById('chat-messages');
+    container.innerHTML = '';
+    if (data.turns && data.turns.length > 0) {
+      // Reverse: API returns newest first, we want oldest first
+      const turns = data.turns.slice().reverse();
+      turns.forEach(t => appendChatBubble(t.role, t.content, t.source, false));
+    }
+    chatHistoryLoaded = true;
+    scrollChatBottom();
+  } catch(e) {
+    console.error('Chat history load error', e);
+  }
+}
+
+function connectChatSSE() {
+  if (chatSSE) { chatSSE.close(); chatSSE = null; }
+  const url = BASE + '/api/chat/stream?token=' + TOKEN;
+  chatSSE = new EventSource(url);
+
+  chatSSE.addEventListener('user_message', function(e) {
+    const ev = JSON.parse(e.data);
+    appendChatBubble('user', ev.content, ev.source, true);
+    if (!chatOpen) { unreadCount++; updateFabBadge(); }
+  });
+
+  chatSSE.addEventListener('assistant_message', function(e) {
+    const ev = JSON.parse(e.data);
+    appendChatBubble('assistant', ev.content, ev.source, true);
+    hideTyping();
+    if (!chatOpen) { unreadCount++; updateFabBadge(); }
+  });
+
+  chatSSE.addEventListener('processing', function(e) {
+    const ev = JSON.parse(e.data);
+    if (ev.processing) showTyping(); else hideTyping();
+  });
+
+  chatSSE.addEventListener('progress', function(e) {
+    const ev = JSON.parse(e.data);
+    showProgress(ev.description);
+  });
+
+  chatSSE.addEventListener('error', function(e) {
+    // SSE error event
+    try {
+      const ev = JSON.parse(e.data);
+      appendChatBubble('assistant', ev.content || 'Error', 'system', true);
+    } catch {}
+    hideTyping();
+  });
+
+  chatSSE.addEventListener('ping', function() { /* keepalive */ });
+
+  chatSSE.onerror = function() {
+    // Auto-reconnect handled by EventSource
+    updateChatStatus(false);
+    setTimeout(() => updateChatStatus(true), 3000);
+  };
+
+  chatSSE.onopen = function() { updateChatStatus(true); };
+}
+
+function updateChatStatus(connected) {
+  const dot = document.getElementById('chat-status-dot');
+  dot.style.background = connected ? '#22c55e' : '#ef4444';
+}
+
+function appendChatBubble(role, content, source, scroll) {
+  const container = document.getElementById('chat-messages');
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble ' + (role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant');
+  bubble.innerHTML = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
+  if (source) {
+    const srcBadge = document.createElement('div');
+    srcBadge.className = 'chat-bubble-source';
+    srcBadge.textContent = 'Via ' + source.charAt(0).toUpperCase() + source.slice(1);
+    bubble.appendChild(srcBadge);
+  }
+  container.appendChild(bubble);
+  if (scroll) scrollChatBottom();
+}
+
+function showTyping() {
+  const bar = document.getElementById('chat-progress-bar');
+  const label = document.getElementById('chat-progress-label');
+  if (bar) { bar.classList.add('active'); }
+  if (label) { label.textContent = 'Thinking...'; }
+  scrollChatBottom();
+}
+
+function hideTyping() {
+  const bar = document.getElementById('chat-progress-bar');
+  if (bar) { bar.classList.remove('active'); }
+}
+
+function showProgress(desc) {
+  const bar = document.getElementById('chat-progress-bar');
+  const label = document.getElementById('chat-progress-label');
+  if (bar) { bar.classList.add('active'); }
+  if (label) { label.textContent = desc; }
+  scrollChatBottom();
+}
+
+function scrollChatBottom() {
+  const container = document.getElementById('chat-messages');
+  setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  // Extract code blocks first
+  var blocks = [];
+  var s = text.replace(/\\\x60\\\x60\\\x60(?:\\\\w*\\\\n)?([\\\\s\\\\S]*?)\\\x60\\\x60\\\x60/g, function(_, code) {
+    blocks.push('<pre><code>' + escapeHtml(code.trim()) + '</code></pre>');
+    return '\\\\x00BLK' + (blocks.length - 1) + '\\\\x00';
+  });
+  // Escape HTML in remaining text
+  s = escapeHtml(s);
+  // Inline code
+  s = s.replace(/\\\x60([^\\\x60]+?)\\\x60/g, '<code>$1</code>');
+  // Bold
+  s = s.replace(/\\\\*\\\\*([^*]+)\\\\*\\\\*/g, '<b>$1</b>');
+  // Italic (single *)
+  s = s.replace(/\\\\*([^*]+)\\\\*/g, '<i>$1</i>');
+  // Line breaks
+  s = s.replace(/\\\\n/g, '<br>');
+  // Restore code blocks
+  s = s.replace(/\\\\x00BLK(\\\\d+)\\\\x00/g, function(_, i) { return blocks[parseInt(i)]; });
+  return s;
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  autoResizeInput();
+  // Disable send while processing
+  document.getElementById('chat-send-btn').disabled = true;
+  try {
+    await fetch(BASE + '/api/chat/send?token=' + TOKEN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    });
+  } catch(e) {
+    console.error('Send error', e);
+  }
+  // Re-enable after a short delay (SSE will deliver the actual messages)
+  setTimeout(() => { document.getElementById('chat-send-btn').disabled = false; }, 1000);
+}
+
+function autoResizeInput() {
+  const el = document.getElementById('chat-input');
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+async function abortProcessing() {
+  try {
+    await fetch(BASE + '/api/chat/abort?token=' + TOKEN, { method: 'POST' });
+  } catch(e) { console.error('Abort error', e); }
+}
 </script>
+
+<!-- Chat FAB -->
+<button class="chat-fab" id="chat-fab" onclick="openChat()">
+  <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+  <span class="chat-fab-badge" id="chat-fab-badge"></span>
+</button>
+
+<!-- Chat overlay -->
+<div class="chat-overlay" id="chat-overlay">
+  <div class="chat-header">
+    <div class="flex items-center">
+      <span class="chat-header-title">Chat</span>
+      <span class="chat-status-dot" id="chat-status-dot" style="background:#6b7280"></span>
+    </div>
+    <button onclick="closeChat()" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+  </div>
+  <div class="chat-messages" id="chat-messages"></div>
+  <div class="chat-progress-bar" id="chat-progress-bar">
+    <div class="chat-progress-pulse"></div>
+    <span class="chat-progress-label" id="chat-progress-label">Thinking...</span>
+    <button class="chat-stop-btn" id="chat-stop-btn" onclick="abortProcessing()" title="Stop">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect width="14" height="14" rx="2"/></svg>
+    </button>
+    <div class="chat-progress-shimmer"></div>
+  </div>
+  <div class="chat-input-area">
+    <textarea class="chat-textarea" id="chat-input" rows="1" placeholder="Send a message..." oninput="autoResizeInput()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
+    <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+  </div>
+</div>
+
 </body>
 </html>`;
 }

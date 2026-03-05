@@ -411,6 +411,34 @@ export function getRecentConversation(
 }
 
 /**
+ * Get a page of conversation turns for the dashboard chat overlay.
+ * Returns turns in reverse chronological order (newest first).
+ * Use `beforeId` for cursor-based pagination (load older messages).
+ */
+export function getConversationPage(
+  chatId: string,
+  limit = 40,
+  beforeId?: number,
+): ConversationTurn[] {
+  if (beforeId) {
+    return db
+      .prepare(
+        `SELECT * FROM conversation_log
+         WHERE chat_id = ? AND id < ?
+         ORDER BY id DESC LIMIT ?`,
+      )
+      .all(chatId, beforeId, limit) as ConversationTurn[];
+  }
+  return db
+    .prepare(
+      `SELECT * FROM conversation_log
+       WHERE chat_id = ?
+       ORDER BY id DESC LIMIT ?`,
+    )
+    .all(chatId, limit) as ConversationTurn[];
+}
+
+/**
  * Prune old conversation_log entries, keeping only the most recent N rows per chat.
  * Called alongside memory decay to prevent unbounded disk growth.
  */

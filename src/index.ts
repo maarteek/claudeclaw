@@ -9,6 +9,7 @@ import { logger } from './logger.js';
 import { cleanupOldUploads } from './media.js';
 import { runDecaySweep } from './memory.js';
 import { initScheduler } from './scheduler.js';
+import { setTelegramConnected, setBotInfo } from './state.js';
 
 const PID_FILE = path.join(STORE_DIR, 'claudeclaw.pid');
 
@@ -55,8 +56,6 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database ready');
 
-  startDashboard();
-
   runDecaySweep();
   setInterval(() => runDecaySweep(), 24 * 60 * 60 * 1000);
 
@@ -64,12 +63,16 @@ async function main(): Promise<void> {
 
   const bot = createBot();
 
+  // Start dashboard after bot is created so we can pass bot.api for chat relay
+  startDashboard(bot.api);
+
   if (ALLOWED_CHAT_ID) {
     initScheduler((text) => bot.api.sendMessage(ALLOWED_CHAT_ID, text, { parse_mode: 'HTML' }).then(() => {}));
   }
 
   const shutdown = async () => {
     logger.info('Shutting down...');
+    setTelegramConnected(false);
     releaseLock();
     await bot.stop();
     process.exit(0);
@@ -81,6 +84,8 @@ async function main(): Promise<void> {
 
   await bot.start({
     onStart: (botInfo) => {
+      setTelegramConnected(true);
+      setBotInfo(botInfo.username ?? '', botInfo.first_name ?? 'ClaudeClaw');
       logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
       console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
       console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID\n`);

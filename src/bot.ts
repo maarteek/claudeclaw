@@ -16,6 +16,7 @@ import { clearSession, getRecentConversation, getRecentMemories, getSession, set
 import { logger } from './logger.js';
 import { downloadMedia, buildPhotoMessage, buildDocumentMessage, buildVideoMessage } from './media.js';
 import { buildMemoryContext, saveConversationTurn } from './memory.js';
+import { emitChatEvent, setProcessing, setActiveAbort, abortActiveQuery } from './state.js';
 
 // ── Context window tracking ──────────────────────────────────────────
 // Uses input_tokens from the last API call (= actual context window size:
@@ -76,6 +77,17 @@ import { getWaChats, getWaChatMessages, sendWhatsAppMessage, WaChat } from './wh
 
 // Per-chat voice mode toggle (in-memory, resets on restart)
 const voiceEnabledChats = new Set<string>();
+
+// Per-chat model override (in-memory, resets on restart)
+// When not set, uses CLI default (Opus via Max/OAuth)
+const chatModelOverride = new Map<string, string>();
+
+const AVAILABLE_MODELS: Record<string, string> = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-5',
+  haiku: 'claude-haiku-4-5',
+};
+const DEFAULT_MODEL_LABEL = 'opus';
 
 // WhatsApp state per Telegram chat
 interface WaStateList { mode: 'list'; chats: WaChat[] }
@@ -295,6 +307,9 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     'Processing message',
   );
 
+  // Emit user message to SSE clients
+  emitChatEvent({ type: 'user_message', chatId: chatIdStr, content: message, source: 'telegram' });
+
   // Build memory context and prepend to message
   const memCtx = await buildMemoryContext(chatIdStr, message);
   const fullMessage = memCtx ? `${memCtx}\n\n${message}` : message;
@@ -308,24 +323,45 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     TYPING_REFRESH_MS,
   );
 
+  setProcessing(chatIdStr, true);
+
   try {
-    // Progress callback: surface sub-agent lifecycle events to Telegram
+    // Progress callback: surface sub-agent lifecycle events to Telegram + SSE
     const onProgress = (event: AgentProgressEvent) => {
       if (event.type === 'task_started') {
+        emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
         void ctx.reply(`🔄 ${event.description}`).catch(() => {});
       } else if (event.type === 'task_completed') {
+        emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
         void ctx.reply(`✓ ${event.description}`).catch(() => {});
+      } else if (event.type === 'tool_active') {
+        // Dashboard only — don't spam Telegram with every tool use
+        emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
       }
     };
+
+    const abortCtrl = new AbortController();
+    setActiveAbort(chatIdStr, abortCtrl);
 
     const result = await runAgent(
       fullMessage,
       sessionId,
       () => void sendTyping(ctx.api, chatId),
       onProgress,
+      chatModelOverride.get(chatIdStr),
+      abortCtrl,
     );
 
+    setActiveAbort(chatIdStr, null);
     clearInterval(typingInterval);
+
+    // Handle abort — send short confirmation and stop
+    if (result.aborted) {
+      setProcessing(chatIdStr, false);
+      emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: 'Stopped.', source: 'telegram' });
+      await ctx.reply('Stopped.');
+      return;
+    }
 
     if (result.newSessionId) {
       setSession(chatIdStr, result.newSessionId);
@@ -342,6 +378,9 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     if (!skipLog) {
       saveConversationTurn(chatIdStr, message, rawResponse, result.newSessionId ?? sessionId);
     }
+
+    // Emit assistant response to SSE clients
+    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: rawResponse, source: 'telegram' });
 
     // Send any attached files first
     for (const file of fileMarkers) {
@@ -372,7 +411,7 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
       if (shouldSpeakBack) {
         try {
           const audioBuffer = await synthesizeSpeech(responseText);
-          await ctx.replyWithVoice(new InputFile(audioBuffer, 'response.mp3'));
+          await ctx.replyWithVoice(new InputFile(audioBuffer, 'response.ogg'));
         } catch (ttsErr) {
           logger.error({ err: ttsErr }, 'TTS failed, falling back to text');
           for (const part of splitMessage(formatForTelegram(responseText))) {
@@ -405,8 +444,12 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
         await ctx.reply(warning);
       }
     }
+
+    setProcessing(chatIdStr, false);
   } catch (err) {
     clearInterval(typingInterval);
+    setActiveAbort(chatIdStr, null);
+    setProcessing(chatIdStr, false);
     logger.error({ err }, 'Agent error');
 
     // Detect context window exhaustion (process exits with code 1 after long sessions)
@@ -432,6 +475,41 @@ export function createBot(): Bot {
   }
 
   const bot = new Bot(TELEGRAM_BOT_TOKEN);
+
+  // Register commands in the Telegram menu
+  bot.api.setMyCommands([
+    { command: 'start', description: 'Start the bot' },
+    { command: 'help', description: 'Help — list available commands' },
+    { command: 'newchat', description: 'Start a new Claude session' },
+    { command: 'respin', description: 'Reload recent context' },
+    { command: 'voice', description: 'Toggle voice mode on/off' },
+    { command: 'model', description: 'Switch model (opus/sonnet/haiku)' },
+    { command: 'memory', description: 'View recent memories' },
+    { command: 'forget', description: 'Clear session' },
+    { command: 'wa', description: 'Recent WhatsApp messages' },
+    { command: 'slack', description: 'Recent Slack messages' },
+    { command: 'dashboard', description: 'Open web dashboard' },
+    { command: 'stop', description: 'Stop current processing' },
+  ]).catch((err) => logger.warn({ err }, 'Failed to register bot commands with Telegram'));
+
+  // /help — list available commands
+  bot.command('help', (ctx) => {
+    if (!isAuthorised(ctx.chat!.id)) return;
+    return ctx.reply(
+      'ClaudeClaw — Commands\n\n' +
+      '/newchat — Start a new Claude session\n' +
+      '/respin — Reload recent context\n' +
+      '/voice — Toggle voice mode on/off\n' +
+      '/model — Switch model (opus/sonnet/haiku)\n' +
+      '/memory — View recent memories\n' +
+      '/forget — Clear session\n' +
+      '/wa — WhatsApp messages\n' +
+      '/slack — Slack messages\n' +
+      '/dashboard — Web dashboard\n' +
+      '/stop — Stop current processing\n\n' +
+      'You can also send voice notes, photos, files, and videos.'
+    );
+  });
 
   // /chatid — get the chat ID (used during first-time setup)
   // Responds to anyone only when ALLOWED_CHAT_ID is not yet configured.
@@ -491,7 +569,7 @@ export function createBot(): Bot {
     if (!isAuthorised(ctx.chat!.id)) return;
     const caps = voiceCapabilities();
     if (!caps.tts) {
-      await ctx.reply('ElevenLabs not configured. Add ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID to .env');
+      await ctx.reply('No TTS provider configured. Add ElevenLabs, Gradium, or install ffmpeg for macOS say fallback.');
       return;
     }
     const chatIdStr = ctx.chat!.id.toString();
@@ -502,6 +580,38 @@ export function createBot(): Bot {
       voiceEnabledChats.add(chatIdStr);
       await ctx.reply('Voice mode ON');
     }
+  });
+
+  // /model — switch Claude model (opus, sonnet, haiku)
+  bot.command('model', async (ctx) => {
+    if (!isAuthorised(ctx.chat!.id)) return;
+    const chatIdStr = ctx.chat!.id.toString();
+    const arg = ctx.match?.trim().toLowerCase();
+
+    if (!arg) {
+      const current = chatModelOverride.get(chatIdStr);
+      const currentLabel = current
+        ? Object.entries(AVAILABLE_MODELS).find(([, v]) => v === current)?.[0] ?? current
+        : DEFAULT_MODEL_LABEL + ' (default)';
+      const models = Object.keys(AVAILABLE_MODELS).join(', ');
+      await ctx.reply(`Current model: ${currentLabel}\nAvailable: ${models}\n\nUsage: /model haiku`);
+      return;
+    }
+
+    if (arg === 'reset' || arg === 'default' || arg === 'opus') {
+      chatModelOverride.delete(chatIdStr);
+      await ctx.reply('Model reset to default (opus)');
+      return;
+    }
+
+    const modelId = AVAILABLE_MODELS[arg];
+    if (!modelId) {
+      await ctx.reply(`Unknown model: ${arg}\nAvailable: ${Object.keys(AVAILABLE_MODELS).join(', ')}`);
+      return;
+    }
+
+    chatModelOverride.set(chatIdStr, modelId);
+    await ctx.reply(`Model changed: ${arg} (${modelId})`);
   });
 
   // /memory — show recent memories for this chat
@@ -606,8 +716,20 @@ export function createBot(): Bot {
     await ctx.reply(`<a href="${url}">Open Dashboard</a>`, { parse_mode: 'HTML' });
   });
 
+  // /stop — interrupt the current agent query
+  bot.command('stop', async (ctx) => {
+    if (!isAuthorised(ctx.chat!.id)) return;
+    const chatIdStr = ctx.chat!.id.toString();
+    const aborted = abortActiveQuery(chatIdStr);
+    if (aborted) {
+      await ctx.reply('Stopped.');
+    } else {
+      await ctx.reply('Nothing running.');
+    }
+  });
+
   // Text messages — and any slash commands not owned by this bot (skills, e.g. /todo /gmail)
-  const OWN_COMMANDS = new Set(['/start', '/newchat', '/respin', '/voice', '/memory', '/forget', '/chatid', '/wa', '/slack', '/dashboard']);
+  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/chatid', '/wa', '/slack', '/dashboard', '/stop']);
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const chatIdStr = ctx.chat!.id.toString();
@@ -767,7 +889,8 @@ export function createBot(): Bot {
     // Clear WA/Slack state and pass through to Claude
     if (state) waState.delete(chatIdStr);
     if (slkState) slackState.delete(chatIdStr);
-    await handleMessage(ctx, text);
+    // Fire-and-forget so grammY can process /stop while agent runs
+    handleMessage(ctx, text).catch((err) => logger.error({ err }, 'Unhandled message error'));
   });
 
   // Voice messages — real transcription via Groq Whisper
@@ -795,7 +918,7 @@ export function createBot(): Bot {
       clearInterval(typingInterval);
       // Only reply with voice if explicitly requested — otherwise execute and respond in text
       const wantsVoiceBack = /\b(respond (with|via|in) voice|send (me )?(a )?voice( note| back)?|voice reply|reply (with|via) voice)\b/i.test(transcribed);
-      await handleMessage(ctx, `[Voice transcribed]: ${transcribed}`, wantsVoiceBack);
+      handleMessage(ctx, `[Voice transcribed]: ${transcribed}`, wantsVoiceBack).catch((err) => logger.error({ err }, 'Unhandled voice message error'));
     } catch (err) {
       clearInterval(typingInterval);
       logger.error({ err }, 'Voice transcription failed');
@@ -821,7 +944,7 @@ export function createBot(): Bot {
       const localPath = await downloadMedia(TELEGRAM_BOT_TOKEN, photo.file_id, 'photo.jpg');
       clearInterval(typingInterval);
       const msg = buildPhotoMessage(localPath, ctx.message.caption ?? undefined);
-      await handleMessage(ctx, msg);
+      handleMessage(ctx, msg).catch((err) => logger.error({ err }, 'Unhandled photo message error'));
     } catch (err) {
       clearInterval(typingInterval);
       logger.error({ err }, 'Photo download failed');
@@ -848,7 +971,7 @@ export function createBot(): Bot {
       const localPath = await downloadMedia(TELEGRAM_BOT_TOKEN, doc.file_id, filename);
       clearInterval(typingInterval);
       const msg = buildDocumentMessage(localPath, filename, ctx.message.caption ?? undefined);
-      await handleMessage(ctx, msg);
+      handleMessage(ctx, msg).catch((err) => logger.error({ err }, 'Unhandled document message error'));
     } catch (err) {
       clearInterval(typingInterval);
       logger.error({ err }, 'Document download failed');
@@ -873,7 +996,7 @@ export function createBot(): Bot {
       const localPath = await downloadMedia(TELEGRAM_BOT_TOKEN, video.file_id, filename);
       clearInterval(typingInterval);
       const msg = buildVideoMessage(localPath, ctx.message.caption ?? undefined);
-      await handleMessage(ctx, msg);
+      handleMessage(ctx, msg).catch((err) => logger.error({ err }, 'Unhandled video message error'));
     } catch (err) {
       clearInterval(typingInterval);
       logger.error({ err }, 'Video download failed');
@@ -898,7 +1021,7 @@ export function createBot(): Bot {
       const localPath = await downloadMedia(TELEGRAM_BOT_TOKEN, videoNote.file_id, filename);
       clearInterval(typingInterval);
       const msg = buildVideoMessage(localPath, undefined);
-      await handleMessage(ctx, msg);
+      handleMessage(ctx, msg).catch((err) => logger.error({ err }, 'Unhandled video note message error'));
     } catch (err) {
       clearInterval(typingInterval);
       logger.error({ err }, 'Video note download failed');
@@ -912,6 +1035,96 @@ export function createBot(): Bot {
   });
 
   return bot;
+}
+
+/**
+ * Process a message sent from the dashboard web UI.
+ * Runs the agent pipeline and relays the response to Telegram.
+ * Response is delivered via SSE (fire-and-forget from the caller's perspective).
+ */
+export async function processMessageFromDashboard(
+  botApi: Api<RawApi>,
+  text: string,
+): Promise<void> {
+  if (!ALLOWED_CHAT_ID) return;
+
+  const chatIdStr = ALLOWED_CHAT_ID;
+
+  logger.info({ messageLen: text.length, source: 'dashboard' }, 'Processing dashboard message');
+
+  emitChatEvent({ type: 'user_message', chatId: chatIdStr, content: text, source: 'dashboard' });
+  setProcessing(chatIdStr, true);
+
+  try {
+    const memCtx = await buildMemoryContext(chatIdStr, text);
+    const fullMessage = memCtx ? `${memCtx}\n\n${text}` : text;
+    const sessionId = getSession(chatIdStr);
+
+    const onProgress = (event: AgentProgressEvent) => {
+      emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
+    };
+
+    const abortCtrl = new AbortController();
+    setActiveAbort(chatIdStr, abortCtrl);
+
+    const result = await runAgent(
+      fullMessage,
+      sessionId,
+      () => {}, // no typing action for dashboard
+      onProgress,
+      undefined,
+      abortCtrl,
+    );
+
+    setActiveAbort(chatIdStr, null);
+
+    // Handle abort
+    if (result.aborted) {
+      emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: 'Stopped.', source: 'dashboard' });
+      return;
+    }
+
+    if (result.newSessionId) {
+      setSession(chatIdStr, result.newSessionId);
+    }
+
+    const rawResponse = result.text?.trim() || 'Done.';
+
+    // Save conversation turn
+    saveConversationTurn(chatIdStr, text, rawResponse, result.newSessionId ?? sessionId);
+
+    // Emit assistant response to SSE clients
+    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: rawResponse, source: 'dashboard' });
+
+    // Relay to Telegram so the user sees it there too
+    const { text: responseText } = extractFileMarkers(rawResponse);
+    if (responseText) {
+      for (const part of splitMessage(formatForTelegram(responseText))) {
+        await botApi.sendMessage(parseInt(chatIdStr), part, { parse_mode: 'HTML' });
+      }
+    }
+
+    // Log token usage
+    if (result.usage) {
+      const activeSessionId = result.newSessionId ?? sessionId;
+      saveTokenUsage(
+        chatIdStr,
+        activeSessionId,
+        result.usage.inputTokens,
+        result.usage.outputTokens,
+        result.usage.lastCallCacheRead,
+        result.usage.lastCallInputTokens,
+        result.usage.totalCostUsd,
+        result.usage.didCompact,
+      );
+    }
+  } catch (err) {
+    setActiveAbort(chatIdStr, null);
+    logger.error({ err }, 'Dashboard message processing error');
+    emitChatEvent({ type: 'error', chatId: chatIdStr, content: 'Something went wrong. Check the logs.' });
+  } finally {
+    setProcessing(chatIdStr, false);
+  }
 }
 
 /**

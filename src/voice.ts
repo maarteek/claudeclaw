@@ -3,8 +3,26 @@ import https from 'https';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
+import { logger } from './logger.js';
 import { readEnvFile } from './env.js';
+
+const execFileAsync = promisify(execFile);
+
+// Cache ffmpeg availability check (only needs to run once)
+let _ffmpegAvailable: boolean | null = null;
+async function hasFfmpeg(): Promise<boolean> {
+  if (_ffmpegAvailable !== null) return _ffmpegAvailable;
+  try {
+    await execFileAsync('ffmpeg', ['-version']);
+    _ffmpegAvailable = true;
+  } catch {
+    _ffmpegAvailable = false;
+  }
+  return _ffmpegAvailable;
+}
 
 // ── Upload directory ────────────────────────────────────────────────────────
 
@@ -203,23 +221,18 @@ export async function transcribeAudio(filePath: string): Promise<string> {
   return response.text ?? '';
 }
 
-// ── TTS: ElevenLabs ─────────────────────────────────────────────────────────
+// ── TTS: ElevenLabs (primary) ────────────────────────────────────────────────
 
 /**
  * Convert text to speech using ElevenLabs and return the audio as a Buffer.
- * Uses the voice ID from ELEVENLABS_VOICE_ID in .env.
  */
-export async function synthesizeSpeech(text: string): Promise<Buffer> {
+async function synthesizeSpeechElevenLabs(text: string): Promise<Buffer> {
   const env = readEnvFile(['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']);
   const apiKey = env.ELEVENLABS_API_KEY;
   const voiceId = env.ELEVENLABS_VOICE_ID;
 
-  if (!apiKey) {
-    throw new Error('ELEVENLABS_API_KEY not set in .env');
-  }
-  if (!voiceId) {
-    throw new Error('ELEVENLABS_VOICE_ID not set in .env');
-  }
+  if (!apiKey) throw new Error('ELEVENLABS_API_KEY not set');
+  if (!voiceId) throw new Error('ELEVENLABS_VOICE_ID not set');
 
   const payload = JSON.stringify({
     text,
@@ -230,7 +243,7 @@ export async function synthesizeSpeech(text: string): Promise<Buffer> {
     },
   });
 
-  const audioBuffer = await httpsRequest(
+  return await httpsRequest(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
     {
       method: 'POST',
@@ -243,24 +256,133 @@ export async function synthesizeSpeech(text: string): Promise<Buffer> {
     },
     payload,
   );
+}
 
-  return audioBuffer;
+// ── TTS: Gradium AI (alternative) ────────────────────────────────────────────
+
+/**
+ * Convert text to speech using Gradium AI and return the audio as a Buffer.
+ * Returns OGG Opus directly.
+ */
+async function synthesizeSpeechGradium(text: string): Promise<Buffer> {
+  const env = readEnvFile(['GRADIUM_API_KEY', 'GRADIUM_VOICE_ID']);
+  const apiKey = env.GRADIUM_API_KEY;
+  const voiceId = env.GRADIUM_VOICE_ID;
+
+  if (!apiKey) throw new Error('GRADIUM_API_KEY not set');
+  if (!voiceId) throw new Error('GRADIUM_VOICE_ID not set');
+
+  const payload = JSON.stringify({
+    text,
+    voice_id: voiceId,
+    output_format: 'opus',
+    only_audio: true,
+  });
+
+  return await httpsRequest(
+    'https://eu.api.gradium.ai/api/post/speech/tts',
+    {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload).toString(),
+      },
+    },
+    payload,
+  );
+}
+
+// ── TTS: macOS say + ffmpeg (local fallback) ─────────────────────────────────
+
+/**
+ * Convert text to speech using macOS `say` + ffmpeg.
+ * Returns an OGG Opus buffer suitable for Telegram voice messages.
+ * Only works on macOS with ffmpeg installed.
+ */
+export async function synthesizeSpeechLocal(text: string): Promise<Buffer> {
+  if (process.platform !== 'darwin') {
+    throw new Error('Local TTS only available on macOS');
+  }
+  if (!(await hasFfmpeg())) {
+    throw new Error('ffmpeg not installed — required for local TTS');
+  }
+
+  const env = readEnvFile(['TTS_VOICE']);
+  const voice = env.TTS_VOICE || 'Thomas';
+  const id = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  const tmpDir = path.join(UPLOADS_DIR, '..', 'tmp');
+  mkdirSync(tmpDir, { recursive: true });
+  const aiffPath = path.join(tmpDir, `tts_${id}.aiff`);
+  const oggPath = path.join(tmpDir, `tts_${id}.ogg`);
+
+  try {
+    await execFileAsync('/usr/bin/say', ['-v', voice, '-o', aiffPath, text]);
+    await execFileAsync('ffmpeg', [
+      '-i', aiffPath,
+      '-c:a', 'libopus',
+      '-b:a', '48k',
+      '-y',
+      oggPath,
+    ]);
+    return fs.readFileSync(oggPath);
+  } finally {
+    try { fs.unlinkSync(aiffPath); } catch { /* ignore */ }
+    try { fs.unlinkSync(oggPath); } catch { /* ignore */ }
+  }
+}
+
+// ── TTS: Cascade (ElevenLabs → Gradium → macOS say) ─────────────────────────
+
+/**
+ * Convert text to speech using the first available provider.
+ * Priority: ElevenLabs → Gradium AI → macOS say + ffmpeg.
+ */
+export async function synthesizeSpeech(text: string): Promise<Buffer> {
+  const env = readEnvFile([
+    'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID',
+    'GRADIUM_API_KEY', 'GRADIUM_VOICE_ID',
+  ]);
+
+  const hasElevenLabs = !!(env.ELEVENLABS_API_KEY && env.ELEVENLABS_VOICE_ID);
+  const hasGradium = !!(env.GRADIUM_API_KEY && env.GRADIUM_VOICE_ID);
+
+  if (hasElevenLabs) {
+    try {
+      return await synthesizeSpeechElevenLabs(text);
+    } catch (err) {
+      logger.warn({ err }, 'ElevenLabs TTS failed, trying next provider');
+    }
+  }
+
+  if (hasGradium) {
+    try {
+      return await synthesizeSpeechGradium(text);
+    } catch (err) {
+      logger.warn({ err }, 'Gradium TTS failed, trying local fallback');
+    }
+  }
+
+  return await synthesizeSpeechLocal(text);
 }
 
 // ── Capabilities check ──────────────────────────────────────────────────────
 
 /**
  * Check whether voice mode is available (all required env vars are set).
+ * TTS is available if any provider is configured or macOS say is available.
  */
 export function voiceCapabilities(): { stt: boolean; tts: boolean } {
   const env = readEnvFile([
     'GROQ_API_KEY',
-    'ELEVENLABS_API_KEY',
-    'ELEVENLABS_VOICE_ID',
+    'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID',
+    'GRADIUM_API_KEY', 'GRADIUM_VOICE_ID',
   ]);
 
   return {
     stt: !!env.GROQ_API_KEY,
-    tts: !!(env.ELEVENLABS_API_KEY && env.ELEVENLABS_VOICE_ID),
+    tts: !!(env.ELEVENLABS_API_KEY && env.ELEVENLABS_VOICE_ID)
+      || !!(env.GRADIUM_API_KEY && env.GRADIUM_VOICE_ID)
+      || process.platform === 'darwin',
   };
 }

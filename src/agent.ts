@@ -29,14 +29,40 @@ export interface UsageInfo {
 
 /** Progress event emitted during agent execution for Telegram feedback. */
 export interface AgentProgressEvent {
-  type: 'task_started' | 'task_completed';
+  type: 'task_started' | 'task_completed' | 'tool_active';
   description: string;
+}
+
+/** Map SDK tool names to human-readable labels. */
+const TOOL_LABELS: Record<string, string> = {
+  Read: 'Reading file',
+  Write: 'Writing file',
+  Edit: 'Editing file',
+  Bash: 'Running command',
+  Grep: 'Searching code',
+  Glob: 'Finding files',
+  WebSearch: 'Web search',
+  WebFetch: 'Fetching page',
+  Agent: 'Sub-agent',
+  NotebookEdit: 'Editing notebook',
+  AskUserQuestion: 'User question',
+};
+
+function toolLabel(toolName: string): string {
+  if (TOOL_LABELS[toolName]) return TOOL_LABELS[toolName];
+  // MCP tools: mcp__server__tool → "server: tool"
+  if (toolName.startsWith('mcp__')) {
+    const parts = toolName.split('__');
+    return parts.length >= 3 ? `${parts[1]}: ${parts.slice(2).join(' ')}` : toolName;
+  }
+  return toolName;
 }
 
 export interface AgentResult {
   text: string | null;
   newSessionId: string | undefined;
   usage: UsageInfo | null;
+  aborted?: boolean;
 }
 
 /**
@@ -80,6 +106,8 @@ export async function runAgent(
   sessionId: string | undefined,
   onTyping: () => void,
   onProgress?: (event: AgentProgressEvent) => void,
+  model?: string,
+  abortController?: AbortController,
 ): Promise<AgentResult> {
   // Read secrets from .env without polluting process.env.
   // CLAUDE_CODE_OAUTH_TOKEN is optional — the subprocess finds auth via ~/.claude/
@@ -130,6 +158,12 @@ export async function runAgent(
 
         // Pass secrets to the subprocess without polluting our own process.env
         env: sdkEnv,
+
+        // Model override (e.g. 'claude-haiku-4-5', 'claude-sonnet-4-5')
+        ...(model ? { model } : {}),
+
+        // Abort support — signals the SDK to kill the subprocess
+        ...(abortController ? { abortController } : {}),
       },
     })) {
       const ev = event as Record<string, unknown>;
@@ -163,6 +197,12 @@ export async function runAgent(
         if (callInputTokens > 0) {
           lastCallInputTokens = callInputTokens;
         }
+      }
+
+      // Tool progress events — surface to dashboard (not Telegram to avoid spam)
+      if (ev['type'] === 'tool_progress' && onProgress) {
+        const name = (ev['tool_name'] as string) ?? 'unknown';
+        onProgress({ type: 'tool_active', description: toolLabel(name) });
       }
 
       // Sub-agent lifecycle events — surface to Telegram for user feedback
@@ -214,6 +254,12 @@ export async function runAgent(
         );
       }
     }
+  } catch (err) {
+    if (abortController?.signal.aborted) {
+      logger.info('Agent query aborted by user');
+      return { text: null, newSessionId, usage, aborted: true };
+    }
+    throw err;
   } finally {
     clearInterval(typingInterval);
   }
