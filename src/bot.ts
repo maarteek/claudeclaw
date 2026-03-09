@@ -30,28 +30,51 @@ const lastUsage = new Map<string, UsageInfo>();
 const sessionBaseline = new Map<string, number>(); // sessionId -> first turn's input_tokens
 
 /**
- * Check if context usage is getting high and return a warning string, or null.
- * Uses input_tokens (total context) not cache_read_input_tokens (partial metric).
+ * Track baseline context size on first turn of a session.
+ * Must be called before getContextFooter/checkContextWarning.
+ */
+function ensureBaseline(chatId: string, sessionId: string | undefined, usage: UsageInfo): void {
+  lastUsage.set(chatId, usage);
+  const contextTokens = usage.lastCallInputTokens;
+  if (contextTokens <= 0) return;
+  const baseKey = sessionId ?? chatId;
+  if (!sessionBaseline.has(baseKey)) {
+    sessionBaseline.set(baseKey, contextTokens);
+  }
+}
+
+/**
+ * Returns a compact context percentage string for every response, or null on first turn.
+ * Appended as a footer to Telegram messages so context usage is always visible.
+ */
+function getContextFooter(sessionId: string | undefined, chatId: string, usage: UsageInfo): string | null {
+  const contextTokens = usage.lastCallInputTokens;
+  if (contextTokens <= 0) return null;
+  const baseKey = sessionId ?? chatId;
+  const baseline = sessionBaseline.get(baseKey);
+  if (baseline === undefined) return null;
+  const available = CONTEXT_LIMIT - baseline;
+  if (available <= 0) return null;
+  const conversationTokens = contextTokens - baseline;
+  const pct = Math.max(0, Math.round((conversationTokens / available) * 100));
+  return `ctx: ${pct}%`;
+}
+
+/**
+ * Returns a warning string when context is critically high or was compacted, or null.
  */
 function checkContextWarning(chatId: string, sessionId: string | undefined, usage: UsageInfo): string | null {
-  lastUsage.set(chatId, usage);
-
   if (usage.didCompact) {
-    return '⚠️ Context window was auto-compacted this turn. Some earlier conversation may have been summarized. Consider /newchat + /respin if things feel off.';
+    return '⚠️ Context was auto-compacted. Some earlier conversation may have been summarised. Consider /newchat + /respin if things feel off.';
   }
 
   const contextTokens = usage.lastCallInputTokens;
   if (contextTokens <= 0) return null;
 
-  // Record baseline on first turn of session (system prompt overhead)
   const baseKey = sessionId ?? chatId;
-  if (!sessionBaseline.has(baseKey)) {
-    sessionBaseline.set(baseKey, contextTokens);
-    // First turn — no warning, just establishing baseline
-    return null;
-  }
+  const baseline = sessionBaseline.get(baseKey);
+  if (baseline === undefined) return null;
 
-  const baseline = sessionBaseline.get(baseKey)!;
   const available = CONTEXT_LIMIT - baseline;
   if (available <= 0) return null;
 
@@ -59,7 +82,7 @@ function checkContextWarning(chatId: string, sessionId: string | undefined, usag
   const pct = Math.round((conversationTokens / available) * 100);
 
   if (pct >= Math.round(CONTEXT_WARN_PCT * 100)) {
-    return `⚠️ Context window at ~${pct}% of available space (~${Math.round(conversationTokens / 1000)}k / ${Math.round(available / 1000)}k conversation tokens). Consider /newchat + /respin soon.`;
+    return `⚠️ Context at ~${pct}%. Consider /newchat + /respin soon.`;
   }
 
   return null;
@@ -73,6 +96,29 @@ import {
 } from './voice.js';
 import { getSlackConversations, getSlackMessages, sendSlackMessage, SlackConversation } from './slack.js';
 import { getWaChats, getWaChatMessages, sendWhatsAppMessage, WaChat } from './whatsapp.js';
+
+// ── Auto-prime: inject ai-os context on new sessions ─────────────────
+const CONTEXT_DIR = '/home/marty/projects/ai-os/context';
+const CONTEXT_FILES = ['personal-info.md', 'business-info.md', 'strategy.md', 'current-data.md'];
+
+/**
+ * Read the ai-os context files and return a single context block.
+ * Called once per new session to give Claude identity/business/strategy context.
+ * Files sync from MartysMachine via Syncthing (ai-os-project folder).
+ */
+function buildPrimeContext(): string {
+  const sections: string[] = [];
+  for (const file of CONTEXT_FILES) {
+    try {
+      const content = fs.readFileSync(`${CONTEXT_DIR}/${file}`, 'utf-8').trim();
+      if (content) sections.push(content);
+    } catch {
+      // File missing or unreadable — skip silently
+    }
+  }
+  if (sections.length === 0) return '';
+  return `[Session context — identity, business, strategy, and current metrics. This is injected once at session start.]\n${sections.join('\n\n---\n\n')}\n[End session context]`;
+}
 
 // Per-chat voice mode toggle (in-memory, resets on restart)
 const voiceEnabledChats = new Set<string>();
@@ -297,9 +343,20 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
 
   // Build memory context and prepend to message
   const memCtx = await buildMemoryContext(chatIdStr, message);
-  const fullMessage = memCtx ? `${memCtx}\n\n${message}` : message;
 
   const sessionId = getSession(chatIdStr);
+
+  // Auto-prime: inject ai-os context files on new sessions
+  let primeCtx = '';
+  if (!sessionId) {
+    primeCtx = buildPrimeContext();
+    if (primeCtx) {
+      logger.info('Auto-prime: injecting ai-os context for new session');
+    }
+  }
+
+  const messageParts = [primeCtx, memCtx, message].filter(Boolean);
+  const fullMessage = messageParts.join('\n\n');
 
   // Start typing immediately, then refresh on interval
   await sendTyping(ctx.api, chatId);
@@ -337,7 +394,16 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     // Extract file markers before any formatting
     const { text: responseText, files: fileMarkers } = extractFileMarkers(rawResponse);
 
-    // Save conversation turn to memory (including full log).
+    // Compute context footer to append to response (always-on indicator)
+    let contextFooter = '';
+    if (result.usage) {
+      const activeSessionId = result.newSessionId ?? sessionId;
+      ensureBaseline(chatIdStr, activeSessionId, result.usage);
+      const footer = getContextFooter(activeSessionId, chatIdStr, result.usage);
+      if (footer) contextFooter = `\n\n${footer}`;
+    }
+
+    // Save conversation turn to memory (including full log, without footer).
     // Skip logging for synthetic messages like /respin to avoid self-referential growth.
     if (!skipLog) {
       saveConversationTurn(chatIdStr, message, rawResponse, result.newSessionId ?? sessionId);
@@ -367,20 +433,22 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     const caps = voiceCapabilities();
     const shouldSpeakBack = caps.tts && (forceVoiceReply || voiceEnabledChats.has(chatIdStr));
 
-    // Send text response (if there's any left after stripping markers)
-    if (responseText) {
+    // Send text response with context footer appended
+    const responseWithFooter = responseText ? responseText + contextFooter : '';
+    if (responseWithFooter) {
       if (shouldSpeakBack) {
         try {
+          // Speak the response without the footer (don't TTS "ctx: 34%")
           const audioBuffer = await synthesizeSpeech(responseText);
           await ctx.replyWithVoice(new InputFile(audioBuffer, 'response.mp3'));
         } catch (ttsErr) {
           logger.error({ err: ttsErr }, 'TTS failed, falling back to text');
-          for (const part of splitMessage(formatForTelegram(responseText))) {
+          for (const part of splitMessage(formatForTelegram(responseWithFooter))) {
             await ctx.reply(part, { parse_mode: 'HTML' });
           }
         }
       } else {
-        for (const part of splitMessage(formatForTelegram(responseText))) {
+        for (const part of splitMessage(formatForTelegram(responseWithFooter))) {
           await ctx.reply(part, { parse_mode: 'HTML' });
         }
       }
