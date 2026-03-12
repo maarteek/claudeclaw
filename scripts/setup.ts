@@ -24,6 +24,11 @@ const PROJECT_ROOT = path.resolve(
   '..',
 );
 
+function expandHome(p: string): string {
+  if (p.startsWith('~/') || p === '~') return path.join(os.homedir(), p.slice(1));
+  return p;
+}
+
 // ── Banner ───────────────────────────────────────────────────────────────────
 function loadBanner(): string {
   try {
@@ -330,7 +335,59 @@ async function main() {
     }
   }
 
-  // ── 6. CLAUDE.md personalization ─────────────────────────────────────────
+  // ── 6. Config directory (CLAUDECLAW_CONFIG) ──────────────────────────────
+  section('Config directory (CLAUDECLAW_CONFIG)');
+
+  info('Personal config files (CLAUDE.md, agent configs) live outside the repo');
+  info('so they are never accidentally committed. Defaults to ~/.claudeclaw');
+  console.log();
+
+  const envForConfig = parseEnvFile(path.join(PROJECT_ROOT, '.env'));
+  const defaultConfigDir = expandHome(
+    envForConfig.CLAUDECLAW_CONFIG || '~/.claudeclaw',
+  );
+  info(`Current path: ${defaultConfigDir}`);
+  console.log();
+
+  let claudeclawConfigDir = defaultConfigDir;
+  const changeConfigDir = await confirm('Change this path?', false);
+  if (changeConfigDir) {
+    const input = await ask('Config directory', '~/.claudeclaw');
+    claudeclawConfigDir = expandHome(input.trim() || '~/.claudeclaw');
+  }
+
+  // If the chosen directory already exists, notify and let user decide
+  if (fs.existsSync(claudeclawConfigDir)) {
+    const hasClaudeMd = fs.existsSync(path.join(claudeclawConfigDir, 'CLAUDE.md'));
+    ok(`Directory already exists${hasClaudeMd ? ' — CLAUDE.md found' : ' — no CLAUDE.md yet'}`);
+    const useExisting = await confirm('Use this directory as-is?', true);
+    if (!useExisting) {
+      const newPath = await ask('Enter a different path');
+      if (newPath.trim()) claudeclawConfigDir = expandHome(newPath.trim());
+    }
+  }
+
+  // Create the directory if needed
+  if (!fs.existsSync(claudeclawConfigDir)) {
+    fs.mkdirSync(claudeclawConfigDir, { recursive: true });
+    ok(`Created ${claudeclawConfigDir}`);
+  }
+
+  // Ensure CLAUDE.md exists in the config dir (copy from example if needed)
+  const claudeMdDest = path.join(claudeclawConfigDir, 'CLAUDE.md');
+  if (!fs.existsSync(claudeMdDest)) {
+    const exampleSrc = path.join(PROJECT_ROOT, 'CLAUDE.md.example');
+    if (fs.existsSync(exampleSrc)) {
+      fs.copyFileSync(exampleSrc, claudeMdDest);
+      ok(`Created CLAUDE.md from template → ${claudeMdDest}`);
+    } else {
+      warn(`No CLAUDE.md.example found — create ${claudeMdDest} manually`);
+    }
+  } else {
+    ok(`CLAUDE.md exists at ${claudeMdDest}`);
+  }
+
+  // ── 6b. CLAUDE.md personalization ────────────────────────────────────────
   section('Personalize your assistant (CLAUDE.md)');
 
   info('CLAUDE.md is the personality and context file loaded into every session.');
@@ -347,12 +404,11 @@ async function main() {
 
   const openClaude = await confirm('Open CLAUDE.md now to edit it?', true);
   if (openClaude) {
-    const claudePath = path.join(PROJECT_ROOT, 'CLAUDE.md');
     const editor = process.env.EDITOR || (PLATFORM === 'win32' ? 'notepad' : 'nano');
     try {
-      spawnSync(editor, [claudePath], { stdio: 'inherit' });
+      spawnSync(editor, [claudeMdDest], { stdio: 'inherit' });
     } catch {
-      warn(`Could not open ${editor}. Edit manually: ${claudePath}`);
+      warn(`Could not open ${editor}. Edit manually: ${claudeMdDest}`);
     }
   }
 
@@ -392,6 +448,9 @@ async function main() {
 
   const envPath = path.join(PROJECT_ROOT, '.env');
   const env: Record<string, string> = fs.existsSync(envPath) ? parseEnvFile(envPath) : {};
+
+  // Persist CLAUDECLAW_CONFIG determined in section 6
+  env.CLAUDECLAW_CONFIG = claudeclawConfigDir;
 
   let botUsername = '';
   if (env.TELEGRAM_BOT_TOKEN) {
@@ -526,6 +585,9 @@ async function main() {
     `TELEGRAM_BOT_TOKEN=${env.TELEGRAM_BOT_TOKEN || ''}`,
     `ALLOWED_CHAT_ID=${env.ALLOWED_CHAT_ID || ''}`,
     '',
+    '# ── Config directory (personal config, never committed) ───────',
+    `CLAUDECLAW_CONFIG=${env.CLAUDECLAW_CONFIG || ''}`,
+    '',
     '# ── Claude auth (optional — uses claude login by default) ─────',
     `ANTHROPIC_API_KEY=${env.ANTHROPIC_API_KEY || ''}`,
     '',
@@ -539,7 +601,7 @@ async function main() {
   ];
 
   // Preserve unknown keys
-  const known = new Set(['TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED']);
+  const known = new Set(['TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED']);
   for (const [k, v] of Object.entries(env)) {
     if (!known.has(k) && v) lines.push(`${k}=${v}`);
   }

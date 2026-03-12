@@ -41,20 +41,30 @@ if (AGENT_ID !== 'main') {
   });
   logger.info({ agentId: AGENT_ID, name: agentConfig.name }, 'Running as agent');
 } else {
-  // For main bot: check if CLAUDE.md exists in CLAUDECLAW_CONFIG or repo
+  // For main bot: read CLAUDE.md from CLAUDECLAW_CONFIG and inject it as
+  // systemPrompt — the same pattern used by sub-agents. Never copy the file
+  // into the repo; that defeats the purpose of CLAUDECLAW_CONFIG and risks
+  // accidentally committing personal config.
   const externalClaudeMd = path.join(CLAUDECLAW_CONFIG, 'CLAUDE.md');
   if (fs.existsSync(externalClaudeMd)) {
-    // Copy external CLAUDE.md into repo root so the SDK picks it up via cwd
-    fs.copyFileSync(externalClaudeMd, path.join(PROJECT_ROOT, 'CLAUDE.md'));
-    logger.info({ source: externalClaudeMd }, 'Loaded CLAUDE.md from CLAUDECLAW_CONFIG');
-  } else if (!fs.existsSync(path.join(PROJECT_ROOT, 'CLAUDE.md'))) {
-    const examplePath = path.join(PROJECT_ROOT, 'CLAUDE.md.example');
-    if (fs.existsSync(examplePath)) {
-      logger.warn(
-        'No CLAUDE.md found. Copy CLAUDE.md.example to CLAUDE.md (or to %s/CLAUDE.md) and customize it.',
-        CLAUDECLAW_CONFIG,
-      );
+    let systemPrompt: string | undefined;
+    try {
+      systemPrompt = fs.readFileSync(externalClaudeMd, 'utf-8');
+    } catch { /* unreadable */ }
+    if (systemPrompt) {
+      setAgentOverrides({
+        agentId: 'main',
+        botToken: activeBotToken,
+        cwd: PROJECT_ROOT,
+        systemPrompt,
+      });
+      logger.info({ source: externalClaudeMd }, 'Loaded CLAUDE.md from CLAUDECLAW_CONFIG');
     }
+  } else if (!fs.existsSync(path.join(PROJECT_ROOT, 'CLAUDE.md'))) {
+    logger.warn(
+      'No CLAUDE.md found. Copy CLAUDE.md.example to %s/CLAUDE.md and customize it.',
+      CLAUDECLAW_CONFIG,
+    );
   }
 }
 
@@ -99,7 +109,11 @@ async function main(): Promise<void> {
   }
 
   if (!activeBotToken) {
-    logger.error('Bot token is not set. Add TELEGRAM_BOT_TOKEN (or agent token) to .env and restart.');
+    if (AGENT_ID === 'main') {
+      logger.error('Bot token is not set. Run npm run setup to configure it.');
+    } else {
+      logger.error({ agentId: AGENT_ID }, `Configuration for agent "${AGENT_ID}" is broken: bot token not set. Check .env or re-run npm run agent:create.`);
+    }
     process.exit(1);
   }
 
@@ -150,7 +164,10 @@ async function main(): Promise<void> {
       logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
       if (AGENT_ID === 'main') {
         console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
-        console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID\n`);
+        if (!ALLOWED_CHAT_ID) {
+          console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID`);
+        }
+        console.log();
       } else {
         console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
       }
