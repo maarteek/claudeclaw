@@ -36,13 +36,17 @@ async function runDueTasks(): Promise<void> {
     logger.info({ taskId: task.id, prompt: task.prompt.slice(0, 60) }, 'Firing task');
 
     try {
-      await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+      if (!task.silent) {
+        await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+      }
 
       // Run as a fresh agent call (no session — scheduled tasks are autonomous)
       const result = await runAgent(task.prompt, undefined, () => {});
       const text = result.text?.trim() || 'Task completed with no output.';
 
-      await sender(formatForTelegram(text));
+      if (!task.silent) {
+        await sender(formatForTelegram(text));
+      }
 
       const nextRun = computeNextRun(task.schedule);
       updateTaskAfterRun(task.id, nextRun, text);
@@ -50,6 +54,7 @@ async function runDueTasks(): Promise<void> {
       logger.info({ taskId: task.id, nextRun }, 'Task complete, next run scheduled');
     } catch (err) {
       logger.error({ err, taskId: task.id }, 'Scheduled task failed');
+      // Always notify on failure, even for silent tasks
       try {
         await sender(`Task failed: "${task.prompt.slice(0, 60)}..." — check logs.`);
       } catch {

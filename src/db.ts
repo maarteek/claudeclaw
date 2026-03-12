@@ -148,6 +148,13 @@ function runMigrations(database: Database.Database): void {
   if (!hasContextTokens) {
     database.exec(`ALTER TABLE token_usage ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0`);
   }
+
+  // Add silent column to scheduled_tasks (run without Telegram notifications)
+  const taskCols = database.prepare(`PRAGMA table_info(scheduled_tasks)`).all() as Array<{ name: string }>;
+  const hasSilent = taskCols.some((c) => c.name === 'silent');
+  if (!hasSilent) {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN silent INTEGER NOT NULL DEFAULT 0`);
+  }
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -261,6 +268,7 @@ export interface ScheduledTask {
   last_run: number | null;
   last_result: string | null;
   status: 'active' | 'paused';
+  silent: number;
   created_at: number;
 }
 
@@ -269,12 +277,13 @@ export function createScheduledTask(
   prompt: string,
   schedule: string,
   nextRun: number,
+  silent = false,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at)
-     VALUES (?, ?, ?, ?, 'active', ?)`,
-  ).run(id, prompt, schedule, nextRun, now);
+    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, silent, created_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+  ).run(id, prompt, schedule, nextRun, silent ? 1 : 0, now);
 }
 
 export function getDueTasks(): ScheduledTask[] {

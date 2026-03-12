@@ -5,7 +5,7 @@
  * Used by your Claude assistant via the Bash tool to manage scheduled tasks.
  *
  * Usage:
- *   node dist/schedule-cli.js create "prompt text" "0 9 * * 1"
+ *   node dist/schedule-cli.js create "prompt text" "0 9 * * 1" [--silent]
  *   node dist/schedule-cli.js list
  *   node dist/schedule-cli.js delete <id>
  *   node dist/schedule-cli.js pause <id>
@@ -38,12 +38,15 @@ function formatDate(unix: number | null): string {
 
 switch (command) {
   case 'create': {
-    const prompt = rest[0];
-    const cron = rest[1];
+    const silent = rest.includes('--silent');
+    const args = rest.filter((a) => a !== '--silent');
+    const prompt = args[0];
+    const cron = args[1];
 
     if (!prompt || !cron) {
-      console.error('Usage: schedule-cli create "prompt" "cron expression"');
+      console.error('Usage: schedule-cli create "prompt" "cron expression" [--silent]');
       console.error('Example: schedule-cli create "Summarise AI news" "0 9 * * 1"');
+      console.error('  --silent  Run without sending Telegram notifications (failures still notify)');
       process.exit(1);
     }
 
@@ -57,11 +60,12 @@ switch (command) {
     }
 
     const id = randomBytes(4).toString('hex');
-    createScheduledTask(id, prompt, cron, nextRun);
+    createScheduledTask(id, prompt, cron, nextRun, silent);
 
     console.log(`Task created: ${id}`);
     console.log(`Prompt:       ${prompt}`);
     console.log(`Schedule:     ${cron}`);
+    console.log(`Silent:       ${silent ? 'yes' : 'no'}`);
     console.log(`Next run:     ${formatDate(nextRun)}`);
     break;
   }
@@ -75,7 +79,8 @@ switch (command) {
     console.log(`${tasks.length} scheduled task${tasks.length === 1 ? '' : 's'}:\n`);
     for (const t of tasks) {
       const status = t.status === 'paused' ? ' [PAUSED]' : '';
-      console.log(`${t.id}${status}`);
+      const silentTag = t.silent ? ' [SILENT]' : '';
+      console.log(`${t.id}${status}${silentTag}`);
       console.log(`  Prompt:   ${t.prompt}`);
       console.log(`  Schedule: ${t.schedule}`);
       console.log(`  Next run: ${formatDate(t.next_run)}`);
