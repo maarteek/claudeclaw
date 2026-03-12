@@ -35,6 +35,11 @@ async function runDueTasks(): Promise<void> {
   for (const task of tasks) {
     logger.info({ taskId: task.id, prompt: task.prompt.slice(0, 60) }, 'Firing task');
 
+    // Advance next_run immediately to prevent duplicate fires while the agent runs
+    const nextRun = computeNextRun(task.schedule);
+    updateTaskAfterRun(task.id, nextRun, task.last_result ?? '');
+    logger.info({ taskId: task.id, nextRun }, 'Next run advanced before execution');
+
     try {
       if (!task.silent) {
         await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
@@ -48,10 +53,9 @@ async function runDueTasks(): Promise<void> {
         await sender(formatForTelegram(text));
       }
 
-      const nextRun = computeNextRun(task.schedule);
       updateTaskAfterRun(task.id, nextRun, text);
 
-      logger.info({ taskId: task.id, nextRun }, 'Task complete, next run scheduled');
+      logger.info({ taskId: task.id, nextRun }, 'Task complete, result saved');
     } catch (err) {
       logger.error({ err, taskId: task.id }, 'Scheduled task failed');
       // Always notify on failure, even for silent tasks
