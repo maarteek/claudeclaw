@@ -150,15 +150,15 @@ describe('extractFileMarkers', () => {
   // ── Path variations ───────────────────────────────────────────────
 
   it('handles paths with spaces', () => {
-    const input = '[SEND_FILE:/Users/mark/Desktop/My Report.pdf]';
+    const input = '[SEND_FILE:/tmp/test/My Report.pdf]';
     const result = extractFileMarkers(input);
-    expect(result.files[0].filePath).toBe('/Users/mark/Desktop/My Report.pdf');
+    expect(result.files[0].filePath).toBe('/tmp/test/My Report.pdf');
   });
 
   it('handles deep nested paths', () => {
-    const input = '[SEND_FILE:/Users/mark/Desktop/Early AI-dopters/SomethingClaw/output/file.csv]';
+    const input = '[SEND_FILE:/tmp/test/output/nested/deep/file.csv]';
     const result = extractFileMarkers(input);
-    expect(result.files[0].filePath).toBe('/Users/mark/Desktop/Early AI-dopters/SomethingClaw/output/file.csv');
+    expect(result.files[0].filePath).toBe('/tmp/test/output/nested/deep/file.csv');
   });
 
   it('handles various file extensions', () => {

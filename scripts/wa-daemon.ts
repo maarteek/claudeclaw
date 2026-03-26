@@ -83,6 +83,9 @@ const client = new Client({
 client.on('qr', (qr: string) => {
   console.log('\n  Scan with WhatsApp > Linked Devices:\n');
   qrcode.generate(qr, { small: true });
+  // Also write raw QR string to file for external rendering
+  fs.writeFileSync(path.join(STORE_DIR, 'qr-latest.txt'), qr);
+  console.log('[wa-daemon] QR string saved to store/qr-latest.txt');
 });
 
 client.on('authenticated', () => console.log('[wa-daemon] authenticated'));
@@ -93,9 +96,16 @@ client.on('ready', () => {
   startOutboxPoller();
 });
 
-client.on('disconnected', (r: string) => {
+client.on('disconnected', async (r: string) => {
   ready = false;
   console.warn('[wa-daemon] disconnected:', r);
+  console.log('[wa-daemon] attempting reconnect in 10s...');
+  await new Promise(resolve => setTimeout(resolve, 10000));
+  try {
+    await client.initialize();
+  } catch (err) {
+    console.error('[wa-daemon] reconnect failed:', err);
+  }
 });
 
 client.on('message', async (msg: wwebjs.Message) => {
@@ -203,4 +213,29 @@ server.listen(HTTP_PORT, '127.0.0.1', () => {
   console.log(`[wa-daemon] HTTP API listening on :${HTTP_PORT}`);
 });
 
-client.initialize();
+// Retry initialize — WhatsApp Web sometimes navigates mid-injection
+// ("Execution context was destroyed" is a known transient race condition)
+(async () => {
+  const MAX_RETRIES = 5;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await client.initialize();
+      break;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isTransient = errMsg.includes('Execution context was destroyed')
+        || errMsg.includes('navigation')
+        || errMsg.includes('Target closed')
+        || errMsg.includes('Protocol error');
+      console.error(`[wa-daemon] initialize attempt ${attempt}/${MAX_RETRIES} failed${isTransient ? ' (transient)' : ''}:`, errMsg);
+      if (attempt === MAX_RETRIES) {
+        console.error('[wa-daemon] all retries exhausted, exiting');
+        process.exit(1);
+      }
+      // Exponential backoff: 5s, 10s, 15s, 20s
+      const delay = attempt * 5000;
+      console.log(`[wa-daemon] retrying in ${delay / 1000}s...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+})();

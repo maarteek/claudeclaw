@@ -1,6 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-import { PROJECT_ROOT } from './config.js';
+import { PROJECT_ROOT, agentCwd } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
@@ -29,14 +29,40 @@ export interface UsageInfo {
 
 /** Progress event emitted during agent execution for Telegram feedback. */
 export interface AgentProgressEvent {
-  type: 'task_started' | 'task_completed';
+  type: 'task_started' | 'task_completed' | 'tool_active';
   description: string;
+}
+
+/** Map SDK tool names to human-readable labels. */
+const TOOL_LABELS: Record<string, string> = {
+  Read: 'Reading file',
+  Write: 'Writing file',
+  Edit: 'Editing file',
+  Bash: 'Running command',
+  Grep: 'Searching code',
+  Glob: 'Finding files',
+  WebSearch: 'Web search',
+  WebFetch: 'Fetching page',
+  Agent: 'Sub-agent',
+  NotebookEdit: 'Editing notebook',
+  AskUserQuestion: 'User question',
+};
+
+function toolLabel(toolName: string): string {
+  if (TOOL_LABELS[toolName]) return TOOL_LABELS[toolName];
+  // MCP tools: mcp__server__tool → "server: tool"
+  if (toolName.startsWith('mcp__')) {
+    const parts = toolName.split('__');
+    return parts.length >= 3 ? `${parts[1]}: ${parts.slice(2).join(' ')}` : toolName;
+  }
+  return toolName;
 }
 
 export interface AgentResult {
   text: string | null;
   newSessionId: string | undefined;
   usage: UsageInfo | null;
+  aborted?: boolean;
 }
 
 /**
@@ -80,6 +106,9 @@ export async function runAgent(
   sessionId: string | undefined,
   onTyping: () => void,
   onProgress?: (event: AgentProgressEvent) => void,
+  model?: string,
+  abortController?: AbortController,
+  onStreamText?: (accumulatedText: string) => void,
 ): Promise<AgentResult> {
   // Read secrets from .env without polluting process.env.
   // CLAUDE_CODE_OAUTH_TOKEN is optional — the subprocess finds auth via ~/.claude/
@@ -101,6 +130,7 @@ export async function runAgent(
   let preCompactTokens: number | null = null;
   let lastCallCacheRead = 0;
   let lastCallInputTokens = 0;
+  let streamedText = '';
 
   // Refresh typing indicator on an interval while Claude works.
   // Telegram's "typing..." action expires after ~5s.
@@ -115,8 +145,9 @@ export async function runAgent(
     for await (const event of query({
       prompt: singleTurn(message),
       options: {
-        // cwd = claudeclaw project root so Claude Code loads our CLAUDE.md
-        cwd: PROJECT_ROOT,
+        // cwd = agent directory (if running as agent) or project root.
+        // Claude Code loads CLAUDE.md from cwd via settingSources: ['project'].
+        cwd: agentCwd ?? PROJECT_ROOT,
 
         // Resume the previous session for this chat (persistent context)
         resume: sessionId,
@@ -130,6 +161,15 @@ export async function runAgent(
 
         // Pass secrets to the subprocess without polluting our own process.env
         env: sdkEnv,
+
+        // Stream partial text so Telegram can show progressive updates
+        includePartialMessages: !!onStreamText,
+
+        // Model override (e.g. 'claude-haiku-4-5', 'claude-sonnet-4-5')
+        ...(model ? { model } : {}),
+
+        // Abort support — signals the SDK to kill the subprocess
+        ...(abortController ? { abortController } : {}),
       },
     })) {
       const ev = event as Record<string, unknown>;
@@ -150,11 +190,12 @@ export async function runAgent(
         );
       }
 
-      // Track per-call token usage from assistant message events.
+      // Track per-call token usage and detect tool use from assistant message events.
       // Each assistant message represents one API call; its usage reflects
       // that single call's context size (not cumulative across the turn).
       if (ev['type'] === 'assistant') {
-        const msgUsage = (ev['message'] as Record<string, unknown>)?.['usage'] as Record<string, number> | undefined;
+        const msg = ev['message'] as Record<string, unknown> | undefined;
+        const msgUsage = msg?.['usage'] as Record<string, number> | undefined;
         const callCacheRead = msgUsage?.['cache_read_input_tokens'] ?? 0;
         const callInputTokens = msgUsage?.['input_tokens'] ?? 0;
         if (callCacheRead > 0) {
@@ -162,6 +203,18 @@ export async function runAgent(
         }
         if (callInputTokens > 0) {
           lastCallInputTokens = callInputTokens;
+        }
+
+        // Extract tool_use blocks from assistant content for progress reporting
+        if (onProgress) {
+          const content = msg?.['content'] as Array<{ type: string; name?: string }> | undefined;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'tool_use' && block.name) {
+                onProgress({ type: 'tool_active', description: toolLabel(block.name) });
+              }
+            }
+          }
         }
       }
 
@@ -177,6 +230,23 @@ export async function runAgent(
           type: 'task_completed',
           description: status === 'failed' ? `Failed: ${summary}` : summary,
         });
+      }
+
+      // Stream text deltas for progressive Telegram updates.
+      // Only stream the outermost assistant response (parent_tool_use_id === null)
+      // to avoid showing internal tool-use reasoning.
+      if (ev['type'] === 'stream_event' && onStreamText && ev['parent_tool_use_id'] === null) {
+        const streamEvent = ev['event'] as Record<string, unknown> | undefined;
+        if (streamEvent?.['type'] === 'content_block_delta') {
+          const delta = streamEvent['delta'] as Record<string, unknown> | undefined;
+          if (delta?.['type'] === 'text_delta' && typeof delta['text'] === 'string') {
+            streamedText += delta['text'];
+            onStreamText(streamedText);
+          }
+        }
+        if (streamEvent?.['type'] === 'message_start') {
+          streamedText = '';
+        }
       }
 
       if (ev['type'] === 'result') {
@@ -214,6 +284,12 @@ export async function runAgent(
         );
       }
     }
+  } catch (err) {
+    if (abortController?.signal.aborted) {
+      logger.info('Agent query aborted by user');
+      return { text: null, newSessionId, usage, aborted: true };
+    }
+    throw err;
   } finally {
     clearInterval(typingInterval);
   }
