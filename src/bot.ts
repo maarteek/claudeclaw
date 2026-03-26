@@ -1164,8 +1164,68 @@ export function createBot(): Bot {
     messageQueue.enqueue(chatIdStr, () => handleMessage(ctx, `/delegate ${args}`));
   });
 
+  // /handoff [N] — export recent conversation messages for continuation in Claude Code
+  // Default: 2 messages (1 exchange). /handoff 10 for last 10 messages.
+  bot.command('handoff', async (ctx) => {
+    if (!isAuthorised(ctx.chat!.id)) return;
+    const chatIdStr = ctx.chat!.id.toString();
+
+    // Parse optional message count from command args
+    const args = ctx.match?.toString().trim();
+    const count = args ? parseInt(args, 10) : 2;
+    const messageCount = (isNaN(count) || count < 1) ? 2 : count;
+
+    const turns = getRecentConversation(chatIdStr, messageCount);
+    if (turns.length === 0) {
+      await ctx.reply('No conversation history to hand off.');
+      return;
+    }
+
+    // Reverse to chronological order (getRecentConversation returns DESC)
+    turns.reverse();
+
+    const now = new Date();
+    const firstTs = new Date(turns[0].created_at * 1000);
+    const lastTs = new Date(turns[turns.length - 1].created_at * 1000);
+
+    const lines = turns.map((t) => {
+      const time = new Date(t.created_at * 1000).toISOString().slice(0, 16).replace('T', ' ');
+      const role = t.role === 'user' ? 'User' : 'Assistant';
+      return `**${role}** (${time}):\n${t.content}`;
+    });
+
+    const md = `---
+name: telegram-handoff
+description: Conversation handed off from Telegram ClaudeClaw for continuation in Claude Code
+type: project
+handed_off_at: ${now.toISOString()}
+message_count: ${turns.length}
+first_message: ${firstTs.toISOString()}
+last_message: ${lastTs.toISOString()}
+---
+
+# Telegram Thread Handoff
+
+Handed off at ${now.toISOString().slice(0, 16).replace('T', ' ')}. ${turns.length} messages.
+
+## Conversation
+
+${lines.join('\n\n')}
+`;
+
+    const handoffPath = `${process.env.HOME}/.claude/projects/-home-marty-projects/memory/telegram-handoff.md`;
+    try {
+      fs.writeFileSync(handoffPath, md, 'utf-8');
+      await ctx.reply(`Handed off ${turns.length} messages to Claude Code.`);
+      logger.info({ messageCount: turns.length }, 'Conversation handed off to Claude Code');
+    } catch (err) {
+      logger.error({ err }, 'Failed to write handoff file');
+      await ctx.reply('Failed to write handoff file. Check logs.');
+    }
+  });
+
   // Text messages — and any slash commands not owned by this bot (skills, e.g. /todo /gmail)
-  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/lock', '/status']);
+  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/lock', '/status', '/handoff']);
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const chatIdStr = ctx.chat!.id.toString();
