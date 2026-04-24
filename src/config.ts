@@ -20,6 +20,7 @@ const envConfig = readEnvFile([
   'DB_ENCRYPTION_KEY',
   'GOOGLE_API_KEY',
   'AGENT_TIMEOUT_MS',
+  'AGENT_MAX_TURNS',
   'SECURITY_PIN_HASH',
   'IDLE_LOCK_MINUTES',
   'EMERGENCY_KILL_PHRASE',
@@ -34,6 +35,7 @@ export let agentCwd: string | undefined; // undefined = use PROJECT_ROOT
 export let agentDefaultModel: string | undefined; // from agent.yaml
 export let agentObsidianConfig: { vault: string; folders: string[]; readOnly?: string[] } | undefined;
 export let agentSystemPrompt: string | undefined; // loaded from agents/{id}/CLAUDE.md
+export let agentMcpAllowlist: string[] | undefined; // from agent.yaml mcp_servers
 
 export function setAgentOverrides(opts: {
   agentId: string;
@@ -42,6 +44,7 @@ export function setAgentOverrides(opts: {
   model?: string;
   obsidian?: { vault: string; folders: string[]; readOnly?: string[] };
   systemPrompt?: string;
+  mcpServers?: string[];
 }): void {
   AGENT_ID = opts.agentId;
   activeBotToken = opts.botToken;
@@ -49,6 +52,7 @@ export function setAgentOverrides(opts: {
   agentDefaultModel = opts.model;
   agentObsidianConfig = opts.obsidian;
   agentSystemPrompt = opts.systemPrompt;
+  agentMcpAllowlist = opts.mcpServers;
 }
 
 export const TELEGRAM_BOT_TOKEN =
@@ -114,6 +118,15 @@ export const TYPING_REFRESH_MS = 4000;
 // (posting YouTube comments, sending multiple messages) leading to duplicate posts.
 export const AGENT_TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || envConfig.AGENT_TIMEOUT_MS || '900000',
+  10,
+);
+
+// Maximum number of agentic turns (tool-use rounds) per query.
+// Prevents runaway loops when external services fail (e.g. stale cookies causing
+// 40+ sequential Bash retries). 0 = unlimited (SDK default).
+// Default: 30 turns, which is generous for complex skills but stops spirals.
+export const AGENT_MAX_TURNS = parseInt(
+  process.env.AGENT_MAX_TURNS || envConfig.AGENT_MAX_TURNS || '30',
   10,
 );
 
