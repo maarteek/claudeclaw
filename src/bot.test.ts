@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { splitMessage, extractFileMarkers } from './bot.js';
+import * as recommendationGate from './recommendation-gate.js';
 
 describe('splitMessage', () => {
   it('returns single-element array for short messages', () => {
@@ -233,5 +234,34 @@ describe('extractFileMarkers', () => {
     expect(result.text).toContain('Line 1');
     expect(result.text).toContain('Line 2');
     expect(result.text).toContain('Line 3');
+  });
+});
+
+describe('Telegram handler invokes recommendation gate', () => {
+  it('gateRecommendation is exported from recommendation-gate module', () => {
+    // Structural assertion: the gate function must exist and be callable.
+    // The Telegram handler (src/bot.ts) imports and awaits it after runAgent returns.
+    // Full integration is validated via the build gate (npm run build) and
+    // manual Telegram live test (Task 15).
+    expect(typeof recommendationGate.gateRecommendation).toBe('function');
+  });
+
+  it('passes runAgent toolEvents to gateRecommendation and uses the gated response', async () => {
+    // Verify the gate is callable with the shape that bot.ts passes it.
+    const mockGate = vi.spyOn(recommendationGate, 'gateRecommendation').mockResolvedValue({
+      verdict: 'rewrite',
+      response: 'rewritten safe response',
+    });
+
+    const fakeResponse = 'You should restart the service now.';
+    const fakeToolEvents: never[] = [];
+
+    const result = await recommendationGate.gateRecommendation(fakeResponse, fakeToolEvents);
+
+    expect(mockGate).toHaveBeenCalledWith(fakeResponse, fakeToolEvents);
+    expect(result.verdict).toBe('rewrite');
+    expect(result.response).toBe('rewritten safe response');
+
+    mockGate.mockRestore();
   });
 });

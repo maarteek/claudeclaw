@@ -25,6 +25,7 @@ import { logger } from './logger.js';
 import { downloadMedia, buildPhotoMessage, buildDocumentMessage, buildVideoMessage } from './media.js';
 import { buildMemoryContext, evaluateMemoryRelevance, saveConversationTurn } from './memory.js';
 import { setHighImportanceCallback } from './memory-ingest.js';
+import { gateRecommendation } from './recommendation-gate.js';
 import { messageQueue } from './message-queue.js';
 import { parseDelegation, delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { emitChatEvent, setProcessing, setActiveAbort, abortActiveQuery } from './state.js';
@@ -569,21 +570,32 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
 
     const rawResponse = result.text?.trim() || 'Done.';
 
+    // Recommendation gate: rewrite ungrounded state-change proposals
+    const gateResult = await gateRecommendation(rawResponse, result.toolEvents);
+    const gatedResponse = gateResult.response;
+
+    if (gateResult.verdict === 'rewrite') {
+      logger.warn({ chatId: chatIdStr, originalLen: rawResponse.length }, 'Recommendation gate rewrote response');
+    }
+    if (gateResult.verdict === 'fail-open' && gateResult.notification) {
+      await ctx.reply(`⚠ ${gateResult.notification}`).catch(() => {});
+    }
+
     // Extract file markers before any formatting
-    const { text: responseText, files: fileMarkers } = extractFileMarkers(rawResponse);
+    const { text: responseText, files: fileMarkers } = extractFileMarkers(gatedResponse);
 
     // Save conversation turn to memory (including full log).
     // Skip logging for synthetic messages like /respin to avoid self-referential growth.
     if (!skipLog) {
-      saveConversationTurn(chatIdStr, message, rawResponse, result.newSessionId ?? sessionId, AGENT_ID);
+      saveConversationTurn(chatIdStr, message, gatedResponse, result.newSessionId ?? sessionId, AGENT_ID);
       // Fire-and-forget: evaluate which surfaced memories were useful
       if (surfacedMemoryIds.length > 0) {
-        void evaluateMemoryRelevance(surfacedMemoryIds, surfacedMemorySummaries, message, rawResponse).catch(() => {});
+        void evaluateMemoryRelevance(surfacedMemoryIds, surfacedMemorySummaries, message, gatedResponse).catch(() => {});
       }
     }
 
     // Emit assistant response to SSE clients
-    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: rawResponse, source: 'telegram' });
+    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: gatedResponse, source: 'telegram' });
 
     // Send any attached files first
     for (const file of fileMarkers) {
