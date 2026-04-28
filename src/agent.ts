@@ -207,6 +207,8 @@ export async function runAgent(
   let lastCallCacheRead = 0;
   let lastCallInputTokens = 0;
   let streamedText = '';
+  const toolEvents: ToolEvent[] = [];
+  const toolUseById = new Map<string, ToolEvent>();
 
   // Refresh typing indicator on an interval while Claude works.
   // Telegram's "typing..." action expires after ~5s.
@@ -295,11 +297,22 @@ export async function runAgent(
         }
 
         // Extract tool_use blocks from assistant content for progress reporting
-        if (onProgress) {
-          const content = msg?.['content'] as Array<{ type: string; name?: string }> | undefined;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === 'tool_use' && block.name) {
+        // and capture into the toolEvents buffer for the recommendation gate.
+        const content = msg?.['content'] as Array<{ type: string; id?: string; name?: string }> | undefined;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'tool_use' && block.id && block.name) {
+              const event: ToolEvent = {
+                toolUseId: block.id,
+                name: block.name,
+                isError: false,
+                hasResult: false,
+                resultPreview: '',
+              };
+              toolEvents.push(event);
+              toolUseById.set(block.id, event);
+
+              if (onProgress) {
                 onProgress({ type: 'tool_active', description: toolLabel(block.name) });
               }
             }
@@ -376,12 +389,12 @@ export async function runAgent(
   } catch (err) {
     if (abortController?.signal.aborted) {
       logger.info('Agent query aborted by user');
-      return { text: null, newSessionId, usage, aborted: true, toolEvents: [] };
+      return { text: null, newSessionId, usage, aborted: true, toolEvents };
     }
     throw err;
   } finally {
     clearInterval(typingInterval);
   }
 
-  return { text: resultText, newSessionId, usage, toolEvents: [] };
+  return { text: resultText, newSessionId, usage, toolEvents };
 }
