@@ -65,7 +65,7 @@ export function decryptField(ciphertext: string): string {
   }
 }
 
-let db: Database.Database;
+export let db: Database.Database;
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -1157,6 +1157,28 @@ export function getRecentConversation(
        ORDER BY created_at DESC LIMIT ?`,
     )
     .all(chatId, limit) as ConversationTurn[];
+}
+
+/**
+ * Returns the content of the second-most-recent assistant message for this
+ * chat/agent. Used by the correction extractor to identify which prior claim
+ * a user correction is disputing. Row 0 is the just-logged current reply;
+ * row 1 is the disputed claim. Returns null if fewer than two assistant
+ * messages exist (e.g. first turn of a session).
+ */
+export function getPreviousAssistantMessage(
+  chatId: string,
+  agentId = 'main',
+): string | null {
+  const rows = db
+    .prepare(
+      `SELECT content FROM conversation_log
+       WHERE chat_id = ? AND agent_id = ? AND role = 'assistant'
+       ORDER BY created_at DESC LIMIT 2`,
+    )
+    .all(chatId, agentId) as Array<{ content: string }>;
+  if (rows.length < 2) return null;
+  return rows[1].content;
 }
 
 /**
