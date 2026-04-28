@@ -6,11 +6,24 @@ import type { ToolEvent } from './agent.js';
  * Patterns that indicate the assistant is proposing a state-change action.
  * When the response matches any of these, the gate fires the Gemini
  * classifier-rewriter to decide whether the proposal is grounded.
+ *
+ * Known limitation: code-block state-change recommendations (e.g. `rm -rf`,
+ * `DROP TABLE`) are NOT covered by these regex patterns. The Stage 2 Gemini
+ * classifier is the safety net for those cases. The regex pre-filter is
+ * intentionally fail-soft on over-match — false positives are corrected by
+ * Stage 2, not by making the regex more restrictive.
  */
 export const STATE_CHANGE_PATTERNS: RegExp[] = [
   /\b(want me to|should I|shall I|do you want me to) (set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke) /i,
   /\b(I'?ll|I will|let me|I'?m going to) (set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke) /i,
-  /\b(I (recommend|suggest|propose)|the fix is to|the solution is to|you (should|need to|have to)) (\w+ )?(set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke) /i,
+  /\b(I (recommend|suggest|propose)|the fix is to|the solution is to|the next step is to|you (should|need to|have to)) (\w+ )?(set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke) /i,
+
+  // NEW patterns closing coverage gaps found in the final review:
+  /\bwould you like me to (set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke) /i,
+  /\bi'?d (suggest|recommend|propose)\b/i,
+  /\b(let'?s|we should|we could) (set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke) /i,
+  /(^|[.!?]\s+)(setting|resetting|deleting|restarting|removing|disabling|stopping|killing|wiping|clearing|fixing|rotating|revoking)\b/i,
+  /\btime to (set|change|delete|reset|restart|remove|update|modify|disable|enable|kill|stop|drop|wipe|clear|fix|rotate|revoke)\b/i,
 ];
 
 export function isStateChangeRecommendation(text: string): boolean {

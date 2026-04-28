@@ -28,9 +28,18 @@ describe('isStateChangeRecommendation', () => {
     'I suggest you restart the service.',
     'The fix is to reset the cache.',
     'The solution is to delete the lock file.',
+    'The next step is to remove the stale config.',
     'You should rotate the credentials.',
     'You need to revoke the token.',
     'You have to disable the rule.',
+    // New patterns added in the final-review coverage fix:
+    'Would you like me to reset the credentials?',              // polite English
+    "I'd suggest we rotate the API key.",                       // contraction + suggest
+    "Let's delete the stale config and restart.",               // let's plural framing
+    'The service is still down. Restarting the container now.', // bare imperative gerund at clause start
+    'Time to remove the old lock file.',                        // "time to" framing
+    // Known limitation: code-block recommendations (rm -rf, DROP TABLE) are
+    // not matched by these regex patterns. Stage 2 Gemini classifier handles them.
   ];
 
   for (const phrase of positives) {
