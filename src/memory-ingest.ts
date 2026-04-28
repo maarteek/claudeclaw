@@ -102,6 +102,11 @@ export async function ingestConversationTurn(
   // Hard filter: skip very short messages and commands
   if (userMessage.length <= 15 || userMessage.startsWith('/')) return false;
 
+  // Short-circuit on corrections — let ingestCorrection handle them exclusively
+  // to avoid cross-extractor duplication. ingestCorrection runs in parallel
+  // (see saveConversationTurn in memory.ts).
+  if (matchesCorrectionPattern(userMessage)) return false;
+
   try {
     const prompt = EXTRACTION_PROMPT
       .replace('{USER_MESSAGE}', userMessage.slice(0, 2000))

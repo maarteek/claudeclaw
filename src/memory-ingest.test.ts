@@ -67,6 +67,14 @@ describe('ingestConversationTurn', () => {
     expect(mockGenerateContent).not.toHaveBeenCalled();
   });
 
+  it('short-circuits on correction patterns without calling Gemini', async () => {
+    // ingestCorrection is the exclusive handler for corrections; ingestConversationTurn
+    // must bail out early to prevent cross-extractor duplication.
+    const result = await ingestConversationTurn('chat1', "you're wrong about that", 'response from assistant');
+    expect(result).toBe(false);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
   // ── Gemini decides to skip ────────────────────────────────────────
 
   it('returns false when Gemini says skip', async () => {
