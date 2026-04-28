@@ -598,11 +598,12 @@ export function saveStructuredMemory(
   importance: number,
   source = 'conversation',
   agentId = 'main',
+  pinned: 0 | 1 = 0,
 ): number {
   const now = Math.floor(Date.now() / 1000);
   const result = db.prepare(
-    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, created_at, accessed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, pinned, created_at, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     chatId,
     source,
@@ -612,6 +613,7 @@ export function saveStructuredMemory(
     JSON.stringify(topics),
     importance,
     agentId,
+    pinned,
     now,
     now,
   );

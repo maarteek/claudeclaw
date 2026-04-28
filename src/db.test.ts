@@ -464,4 +464,20 @@ describe('database', () => {
       expect(getPreviousAssistantMessage('chat-3', 'research')).toBeNull();
     });
   });
+
+  // ── saveStructuredMemory pinned parameter ────────────────────────
+
+  describe('saveStructuredMemory pinned parameter', () => {
+    it('defaults pinned to 0 when not specified', () => {
+      const id = saveStructuredMemory('chat-1', 'raw', 'summary', [], [], 0.5);
+      const row = db.prepare('SELECT pinned FROM memories WHERE id = ?').get(id) as { pinned: number };
+      expect(row.pinned).toBe(0);
+    });
+
+    it('stores pinned=1 when explicitly passed', () => {
+      const id = saveStructuredMemory('chat-1', 'raw', 'summary', [], [], 1.0, 'correction', 'main', 1);
+      const row = db.prepare('SELECT pinned FROM memories WHERE id = ?').get(id) as { pinned: number };
+      expect(row.pinned).toBe(1);
+    });
+  });
 });
