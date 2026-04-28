@@ -132,6 +132,19 @@ function toolLabel(toolName: string): string {
   return toolName;
 }
 
+function stringifyToolResultPreview(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    const first = raw[0] as { text?: string } | undefined;
+    if (first && typeof first.text === 'string') return first.text;
+  }
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
 export interface AgentResult {
   text: string | null;
   newSessionId: string | undefined;
@@ -314,6 +327,30 @@ export async function runAgent(
 
               if (onProgress) {
                 onProgress({ type: 'tool_active', description: toolLabel(block.name) });
+              }
+            }
+          }
+        }
+      }
+
+      // Capture tool_result blocks from user messages and match back to their
+      // tool_use via tool_use_id (populated by the assistant-event handler above).
+      if (ev['type'] === 'user') {
+        const msg = ev['message'] as Record<string, unknown> | undefined;
+        const content = msg?.['content'] as Array<{
+          type: string;
+          tool_use_id?: string;
+          is_error?: boolean | null;
+          content?: unknown;
+        }> | undefined;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'tool_result' && block.tool_use_id) {
+              const found = toolUseById.get(block.tool_use_id);
+              if (found) {
+                found.isError = block.is_error === true;
+                found.hasResult = true;
+                found.resultPreview = stringifyToolResultPreview(block.content).slice(0, 200);
               }
             }
           }
