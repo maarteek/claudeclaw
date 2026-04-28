@@ -1,6 +1,6 @@
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { cosineSimilarity, embedText } from './embeddings.js';
-import { getMemoriesWithEmbeddings, saveStructuredMemory, saveMemoryEmbedding } from './db.js';
+import { getMemoriesWithEmbeddings, saveStructuredMemory, saveMemoryEmbedding, getPreviousAssistantMessage } from './db.js';
 import { logger } from './logger.js';
 
 /**
@@ -179,6 +179,132 @@ export async function ingestConversationTurn(
   } catch (err) {
     // Gemini failure should never block the bot
     logger.error({ err }, 'Memory ingestion failed (Gemini)');
+    return false;
+  }
+}
+
+const CORRECTION_EXTRACTION_PROMPT = `The user has just used a phrase that suggests they are correcting the
+assistant. Decide whether they are actually correcting a claim YOU
+(the assistant) made in your previous message, vs. talking about a
+third party or unrelated fact.
+
+Previous assistant message:
+{PREV}
+
+User's correction:
+{USER}
+
+If the user is NOT correcting your prior claim (e.g. they are correcting
+a fact about a third party that you happened to mention, or they are
+just venting), return:
+{"skip": true}
+
+If the user IS correcting a claim you made, extract:
+{
+  "skip": false,
+  "disputed_claim": "the claim you made that they are disputing",
+  "corrected_fact": "the corrected truth per the user",
+  "summary": "one-sentence durable rule, written as: 'X is correct, not Y' or 'Never assume Z; check W instead'",
+  "topics": ["topic1", "topic2"]
+}
+
+The summary becomes a durable memory that surfaces in future sessions, so write it as a clear factual rule, not as a narrative of the exchange.`;
+
+interface CorrectionExtractionResult {
+  skip?: boolean;
+  disputed_claim?: string;
+  corrected_fact?: string;
+  summary?: string;
+  topics?: string[];
+}
+
+/**
+ * Detect a user correction and write a pinned high-importance memory
+ * linking the disputed claim to the corrected fact.
+ *
+ * Two-stage pipeline:
+ *   1. Regex pre-filter on user message (cheap, deterministic)
+ *   2. Specialised Gemini call to extract the disputed claim and the rule
+ *
+ * Runs in parallel with the existing ingestConversationTurn extractor;
+ * both writes are independent. Fire-and-forget at the call site.
+ */
+export async function ingestCorrection(
+  chatId: string,
+  userMessage: string,
+  agentId = 'main',
+): Promise<boolean> {
+  // Stage 1: regex pre-filter
+  if (!matchesCorrectionPattern(userMessage)) return false;
+
+  // Stage 2: fetch previous assistant message
+  const prev = getPreviousAssistantMessage(chatId, agentId);
+  if (!prev) return false;
+
+  try {
+    const prompt = CORRECTION_EXTRACTION_PROMPT
+      .replace('{PREV}', prev.slice(0, 2000))
+      .replace('{USER}', userMessage.slice(0, 2000));
+
+    const raw = await generateContent(prompt);
+    const result = parseJsonResponse<CorrectionExtractionResult>(raw);
+
+    if (!result || result.skip) return false;
+    if (!result.summary) {
+      logger.warn({ result }, 'Correction extraction missing summary');
+      return false;
+    }
+
+    // Embed for duplicate detection (matches existing extractor)
+    let embedding: number[] = [];
+    try {
+      const embeddingText = `${result.summary} ${(result.topics ?? []).join(' ')}`;
+      embedding = await embedText(embeddingText);
+    } catch (embErr) {
+      logger.warn({ err: embErr }, 'Failed to embed correction memory');
+    }
+
+    if (embedding.length > 0) {
+      const existing = getMemoriesWithEmbeddings(chatId);
+      for (const mem of existing) {
+        const sim = cosineSimilarity(embedding, mem.embedding);
+        if (sim > 0.85) {
+          logger.debug(
+            { similarity: sim.toFixed(3), existingId: mem.id, newSummary: result.summary.slice(0, 60) },
+            'Skipping duplicate correction memory',
+          );
+          return false;
+        }
+      }
+    }
+
+    const memoryId = saveStructuredMemory(
+      chatId,
+      userMessage,
+      result.summary,
+      [],
+      result.topics ?? [],
+      1.0,                  // importance
+      'correction',         // source
+      agentId,
+      1,                    // pinned
+    );
+
+    if (embedding.length > 0) {
+      saveMemoryEmbedding(memoryId, embedding);
+    }
+
+    if (onHighImportanceMemory) {
+      try { onHighImportanceMemory(memoryId, result.summary, 1.0); } catch { /* non-fatal */ }
+    }
+
+    logger.info(
+      { chatId, memoryId, disputedClaim: result.disputed_claim?.slice(0, 80), summary: result.summary.slice(0, 80) },
+      'Correction memory pinned',
+    );
+    return true;
+  } catch (err) {
+    logger.error({ err }, 'Correction extraction failed (Gemini)');
     return false;
   }
 }

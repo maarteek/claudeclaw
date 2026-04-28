@@ -9,6 +9,7 @@ vi.mock('./db.js', () => ({
   saveStructuredMemory: vi.fn(() => 1),
   saveMemoryEmbedding: vi.fn(),
   getMemoriesWithEmbeddings: vi.fn(() => []),
+  getPreviousAssistantMessage: vi.fn(),
 }));
 
 vi.mock('./embeddings.js', () => ({
@@ -20,13 +21,17 @@ vi.mock('./logger.js', () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-import { ingestConversationTurn, matchesCorrectionPattern } from './memory-ingest.js';
+import { ingestConversationTurn, matchesCorrectionPattern, ingestCorrection } from './memory-ingest.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
-import { saveStructuredMemory } from './db.js';
+import { saveStructuredMemory, getMemoriesWithEmbeddings, getPreviousAssistantMessage } from './db.js';
+import { cosineSimilarity } from './embeddings.js';
 
 const mockGenerateContent = vi.mocked(generateContent);
 const mockParseJson = vi.mocked(parseJsonResponse);
 const mockSave = vi.mocked(saveStructuredMemory);
+const mockGetPrev = vi.mocked(getPreviousAssistantMessage);
+const mockGetMemoriesWithEmbeddings = vi.mocked(getMemoriesWithEmbeddings);
+const mockCosineSimilarity = vi.mocked(cosineSimilarity);
 
 describe('ingestConversationTurn', () => {
   beforeEach(() => {
@@ -359,4 +364,89 @@ describe('matchesCorrectionPattern', () => {
       expect(matchesCorrectionPattern(phrase)).toBe(false);
     });
   }
+});
+
+describe('ingestCorrection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCosineSimilarity.mockReturnValue(0);
+    mockGetMemoriesWithEmbeddings.mockReturnValue([]);
+  });
+
+  it('returns false when user message has no correction phrase', async () => {
+    const result = await ingestCorrection('chat-1', 'send the email', 'main');
+    expect(result).toBe(false);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
+  it('returns false when there is no previous assistant message', async () => {
+    mockGetPrev.mockReturnValue(null);
+    const result = await ingestCorrection('chat-1', "you're wrong", 'main');
+    expect(result).toBe(false);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
+  it('writes a pinned memory on the qBit-fixture verbatim phrase', async () => {
+    mockGetPrev.mockReturnValue('Want me to set the qBit password to something new?');
+    mockGenerateContent.mockResolvedValue('{"skip":false,"disputed_claim":"qBit password needs changing","corrected_fact":"qBit password is fine","summary":"qBit password is correct; do not propose changing it.","topics":["qbit","credentials"]}');
+    mockParseJson.mockReturnValue({
+      skip: false,
+      disputed_claim: 'qBit password needs changing',
+      corrected_fact: 'qBit password is fine',
+      summary: 'qBit password is correct; do not propose changing it.',
+      topics: ['qbit', 'credentials'],
+    });
+
+    const phrase = "There's nothing wrong with the qubit password. That's not the problem. You've got it wrong.";
+    const result = await ingestCorrection('chat-1', phrase, 'main');
+
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    const args = mockSave.mock.calls[0];
+    expect(args[5]).toBe(1.0);          // importance
+    expect(args[6]).toBe('correction'); // source
+    expect(args[8]).toBe(1);            // pinned
+  });
+
+  it('returns false when Gemini classifies as third-party correction (skip=true)', async () => {
+    mockGetPrev.mockReturnValue('I think Bob still works at ACME.');
+    mockGenerateContent.mockResolvedValue('{"skip":true}');
+    mockParseJson.mockReturnValue({ skip: true });
+
+    const result = await ingestCorrection('chat-1', "you're wrong, Bob left ACME last year", 'main');
+
+    expect(result).toBe(false);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it('skips writing if a near-duplicate memory exists (cosine sim > 0.85)', async () => {
+    mockGetPrev.mockReturnValue('Maybe the password is the issue?');
+    mockGenerateContent.mockResolvedValue('{"skip":false,"summary":"qBit password is correct.","disputed_claim":"x","corrected_fact":"y","topics":[]}');
+    mockParseJson.mockReturnValue({
+      skip: false,
+      disputed_claim: 'x',
+      corrected_fact: 'y',
+      summary: 'qBit password is correct.',
+      topics: [],
+    });
+    mockGetMemoriesWithEmbeddings.mockReturnValue([
+      { id: 47, embedding: [0.1, 0.2, 0.3], summary: 'existing pinned mem', importance: 1.0 },
+    ]);
+    mockCosineSimilarity.mockReturnValue(0.9);
+
+    const result = await ingestCorrection('chat-1', "you're wrong about that", 'main');
+
+    expect(result).toBe(false);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it('returns false on Gemini failure (logged but non-fatal)', async () => {
+    mockGetPrev.mockReturnValue('Some prior claim');
+    mockGenerateContent.mockRejectedValue(new Error('Gemini timeout'));
+
+    const result = await ingestCorrection('chat-1', "you're wrong", 'main');
+
+    expect(result).toBe(false);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
 });
