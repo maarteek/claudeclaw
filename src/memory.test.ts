@@ -257,6 +257,55 @@ describe('runDecaySweep', () => {
   });
 });
 
+describe('Memory 47 regression — pinned high-importance memory still surfaces', () => {
+  // Seed a memory shaped like the real production memory id=47:
+  // TorrentLeech / qBit / Prowlarr correction, importance=1.0, pinned=1.
+  // These tests lock in buildMemoryContext's contract: a pinned high-importance
+  // memory MUST surface both via Layer 1 (keyword match) and Layer 2 (high-importance
+  // sweep), so future refactors cannot silently break the correction-retrieval path.
+
+  const mem47 = makeMemory({
+    id: 47,
+    chat_id: 'chat-47',
+    source: 'correction',
+    summary: 'TorrentLeech and qBit credentials are CORRECT. Stale-state Prowlarr bug fixed by self-heal in commit 8d29c97.',
+    raw_text: 'TorrentLeech and qBit credentials are CORRECT. Intermittent fetch_failed errors on TL grabs are a Prowlarr 2.3.5.5327 stale-state bug, fixed by self-heal.',
+    entities: '["torrentleech","qbit","prowlarr"]',
+    topics: '["credentials","troubleshooting"]',
+    importance: 1.0,
+    pinned: 1,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSearchConsolidations.mockReturnValue([]);
+    mockGetRecentConsolidations.mockReturnValue([]);
+  });
+
+  it('surfaces a pinned memory with importance=1.0 when the query keyword matches (Layer 1)', async () => {
+    // Layer 1: searchMemories returns the memory because "torrent leech" matches keywords
+    mockSearchMemories.mockReturnValue([mem47]);
+    mockGetRecentHighImportance.mockReturnValue([]);
+
+    const result = await buildMemoryContext('chat-47', 'why did the torrent leech grab fail last night?', 'main');
+
+    expect(result.surfacedMemoryIds).toContain(47);
+    expect(result.contextText).toContain('TorrentLeech');
+  });
+
+  it('surfaces the pinned memory via high-importance Layer 2 even without keyword match', async () => {
+    // Layer 1 returns nothing (query "what time is it?" has no keyword overlap).
+    // Layer 2 (getRecentHighImportanceMemories) returns the pinned memory because
+    // importance=1.0 >= 0.5 threshold.
+    mockSearchMemories.mockReturnValue([]);
+    mockGetRecentHighImportance.mockReturnValue([mem47]);
+
+    const result = await buildMemoryContext('chat-47', 'what time is it?', 'main');
+
+    expect(result.surfacedMemoryIds).toContain(47);
+  });
+});
+
 describe('saveConversationTurn fires both extractors', () => {
   beforeEach(() => {
     vi.clearAllMocks();
