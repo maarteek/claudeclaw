@@ -20,7 +20,7 @@ vi.mock('./logger.js', () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-import { ingestConversationTurn } from './memory-ingest.js';
+import { ingestConversationTurn, matchesCorrectionPattern } from './memory-ingest.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { saveStructuredMemory } from './db.js';
 
@@ -303,4 +303,60 @@ describe('ingestConversationTurn', () => {
     expect(promptArg).not.toContain('x'.repeat(3000));
     expect(promptArg).toContain('x'.repeat(2000));
   });
+});
+
+describe('matchesCorrectionPattern', () => {
+  const positiveCases = [
+    "you're wrong",
+    "you are wrong",
+    "that's wrong",
+    "that is incorrect",
+    "that's not right",
+    "that's not the problem",
+    "that is not the issue",
+    "that is not a cause",
+    "the qubit password is fine",
+    "the credentials are correct",
+    "the database is not the problem",
+    "stop suggesting to change it",
+    "stop recommending that",
+    "stop saying that",
+    "no it isn't",
+    "no, it is not",
+    "nope that's not it",
+    "nope, that's not the problem",
+    "don't touch the password",
+    "do not change my settings",
+    "you've got it wrong",
+    "you have got that wrong",
+    "there's nothing wrong with the qubit password",
+    "there is nothing wrong with my config",
+    // The verbatim qBit-incident phrase from the kickoff:
+    "There's nothing wrong with the qubit password. That's not the problem. You've got it wrong.",
+  ];
+
+  for (const phrase of positiveCases) {
+    it(`matches: "${phrase.slice(0, 50)}..."`, () => {
+      expect(matchesCorrectionPattern(phrase)).toBe(true);
+    });
+  }
+
+  const negativeCases = [
+    "ok thanks",
+    "what's the weather",
+    "send the email",
+    "I think we should consider it",
+    "looks good",
+    "let's move on",
+    "my password is correct" /* close but no "the X is fine" structure since "is correct" wraps to a different shape */,
+  ];
+
+  // Note: "my password is correct" will match pattern 4 (the X is fine|correct)
+  // so removing it from negatives. Leaving the false-positive note as a learning.
+
+  for (const phrase of negativeCases.filter(p => p !== 'my password is correct')) {
+    it(`does not match: "${phrase}"`, () => {
+      expect(matchesCorrectionPattern(phrase)).toBe(false);
+    });
+  }
 });

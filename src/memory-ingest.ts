@@ -3,6 +3,31 @@ import { cosineSimilarity, embedText } from './embeddings.js';
 import { getMemoriesWithEmbeddings, saveStructuredMemory, saveMemoryEmbedding } from './db.js';
 import { logger } from './logger.js';
 
+/**
+ * Hardline correction phrases. When a user message matches any of these,
+ * it triggers the specialised correction extractor (ingestCorrection),
+ * which writes a pinned high-importance memory linking the disputed claim
+ * to the corrected fact.
+ *
+ * Patterns added over time as new failure modes are observed.
+ */
+export const CORRECTION_PATTERNS: RegExp[] = [
+  /\byou('?re| are) wrong\b/i,
+  /\bthat('?s| is) (wrong|incorrect|not right)\b/i,
+  /\bthat('?s| is) not (the|a) (problem|issue|cause)\b/i,
+  /\bthe \w[\w\s]{1,40}? (is|are) (fine|correct|not the (issue|problem|cause))\b/i,
+  /\bstop (suggesting|recommending|saying|proposing|trying) (to|that)?\b/i,
+  /\bno,? it (isn'?t|is not)\b/i,
+  /\bnope,? that('?s| is) not (it|right|the (problem|issue))\b/i,
+  /\b(don'?t|do not) (touch|change|reset|modify|update) (the|my|our|that) \w/i,
+  /\byou('?ve| have) got (it|that|this) wrong\b/i,
+  /\bthere('?s| is) nothing wrong with (the|my|our|that) \w/i,
+];
+
+export function matchesCorrectionPattern(text: string): boolean {
+  return CORRECTION_PATTERNS.some((p) => p.test(text));
+}
+
 // Callback for notifying when a high-importance memory is created.
 // Set by bot.ts to send a Telegram notification.
 let onHighImportanceMemory: ((memoryId: number, summary: string, importance: number) => void) | null = null;
