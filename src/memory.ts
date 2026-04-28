@@ -17,7 +17,7 @@ import {
 import { cosineSimilarity, embedText } from './embeddings.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { logger } from './logger.js';
-import { ingestConversationTurn } from './memory-ingest.js';
+import { ingestConversationTurn, ingestCorrection } from './memory-ingest.js';
 import { buildObsidianContext } from './obsidian.js';
 
 /**
@@ -195,6 +195,15 @@ export function saveConversationTurn(
   // This runs async and never blocks the user's response
   void ingestConversationTurn(chatId, userMessage, claudeResponse, agentId).catch((err) => {
     logger.error({ err }, 'Memory ingestion fire-and-forget failed');
+  });
+
+  // Fire-and-forget: NEW correction-detection extractor (parallel).
+  // Note: this fires AFTER both logConversationTurn calls above, so when
+  // ingestCorrection internally calls getPreviousAssistantMessage(),
+  // rows[0] is the just-written claudeResponse and rows[1] is the
+  // disputed prior assistant claim — that is the correct semantic.
+  void ingestCorrection(chatId, userMessage, agentId).catch((err) => {
+    logger.error({ err }, 'Correction ingestion fire-and-forget failed');
   });
 }
 

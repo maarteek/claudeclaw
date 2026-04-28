@@ -19,6 +19,7 @@ vi.mock('./db.js', () => ({
 
 vi.mock('./memory-ingest.js', () => ({
   ingestConversationTurn: vi.fn(() => Promise.resolve(false)),
+  ingestCorrection: vi.fn(() => Promise.resolve(false)),
 }));
 
 vi.mock('./embeddings.js', () => ({
@@ -47,7 +48,7 @@ import {
   getRecentConsolidations,
 } from './db.js';
 
-import { ingestConversationTurn } from './memory-ingest.js';
+import { ingestConversationTurn, ingestCorrection } from './memory-ingest.js';
 
 const mockSearchMemories = vi.mocked(searchMemories);
 const mockGetRecentHighImportance = vi.mocked(getRecentHighImportanceMemories);
@@ -253,5 +254,21 @@ describe('runDecaySweep', () => {
   it('calls decayMemories once', () => {
     runDecaySweep();
     expect(mockDecayMemories).toHaveBeenCalledOnce();
+  });
+});
+
+describe('saveConversationTurn fires both extractors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fires ingestConversationTurn AND ingestCorrection in parallel', async () => {
+    saveConversationTurn('chat-1', 'user msg', 'assistant resp', 'sess-1', 'main');
+
+    // Allow microtasks for the fire-and-forget calls
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(vi.mocked(ingestConversationTurn)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ingestCorrection)).toHaveBeenCalledWith('chat-1', 'user msg', 'main');
   });
 });
