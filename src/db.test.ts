@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
+  db,
   setSession,
   getSession,
   clearSession,
@@ -21,6 +22,7 @@ import {
   getDashboardTopAccessedMemories,
   getDashboardMemoriesList,
   getDashboardMemoryTimeline,
+  getPreviousAssistantMessage,
 } from './db.js';
 
 describe('database', () => {
@@ -410,58 +412,56 @@ describe('database', () => {
       expect(timeline[0]).toHaveProperty('count');
     });
   });
-});
 
-import { _initTestDatabase, getPreviousAssistantMessage, db } from './db.js';
+  // Helper: insert a conversation_log row with an explicit created_at so tests
+  // are not sensitive to same-second timestamp collisions (created_at is
+  // stored as Unix seconds; multiple rows inserted within one second would
+  // otherwise have identical values, making ORDER BY created_at DESC
+  // non-deterministic).
+  function insertConvoRow(
+    chatId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    createdAt: number,
+    agentId = 'main',
+  ): void {
+    db.prepare(
+      `INSERT INTO conversation_log (chat_id, session_id, role, content, created_at, agent_id)
+       VALUES (?, NULL, ?, ?, ?, ?)`,
+    ).run(chatId, role, content, createdAt, agentId);
+  }
 
-// Helper: insert a conversation_log row with an explicit created_at so tests
-// are not sensitive to same-second timestamp collisions (created_at is
-// stored as Unix seconds; multiple rows inserted within one second would
-// otherwise have identical values, making ORDER BY created_at DESC
-// non-deterministic).
-function insertConvoRow(
-  chatId: string,
-  role: 'user' | 'assistant',
-  content: string,
-  createdAt: number,
-  agentId = 'main',
-): void {
-  db.prepare(
-    `INSERT INTO conversation_log (chat_id, session_id, role, content, created_at, agent_id)
-     VALUES (?, NULL, ?, ?, ?, ?)`,
-  ).run(chatId, role, content, createdAt, agentId);
-}
+  describe('getPreviousAssistantMessage', () => {
+    beforeEach(() => {
+      _initTestDatabase();
+      db.prepare('DELETE FROM conversation_log').run();
+    });
 
-describe('getPreviousAssistantMessage', () => {
-  beforeEach(() => {
-    _initTestDatabase();
-    db.prepare('DELETE FROM conversation_log').run();
-  });
+    it('returns the second-most-recent assistant message for the chat/agent', () => {
+      insertConvoRow('chat-1', 'user', 'first user msg', 1000, 'main');
+      insertConvoRow('chat-1', 'assistant', 'old assistant claim', 1001, 'main');
+      insertConvoRow('chat-1', 'user', 'correction message', 1002, 'main');
+      insertConvoRow('chat-1', 'assistant', 'just-replied assistant', 1003, 'main');
 
-  it('returns the second-most-recent assistant message for the chat/agent', () => {
-    insertConvoRow('chat-1', 'user', 'first user msg', 1000, 'main');
-    insertConvoRow('chat-1', 'assistant', 'old assistant claim', 1001, 'main');
-    insertConvoRow('chat-1', 'user', 'correction message', 1002, 'main');
-    insertConvoRow('chat-1', 'assistant', 'just-replied assistant', 1003, 'main');
+      const result = getPreviousAssistantMessage('chat-1', 'main');
+      expect(result).toBe('old assistant claim');
+    });
 
-    const result = getPreviousAssistantMessage('chat-1', 'main');
-    expect(result).toBe('old assistant claim');
-  });
+    it('returns null when fewer than two assistant messages exist', () => {
+      insertConvoRow('chat-2', 'user', 'first msg', 1000, 'main');
+      insertConvoRow('chat-2', 'assistant', 'only assistant', 1001, 'main');
 
-  it('returns null when fewer than two assistant messages exist', () => {
-    insertConvoRow('chat-2', 'user', 'first msg', 1000, 'main');
-    insertConvoRow('chat-2', 'assistant', 'only assistant', 1001, 'main');
+      const result = getPreviousAssistantMessage('chat-2', 'main');
+      expect(result).toBeNull();
+    });
 
-    const result = getPreviousAssistantMessage('chat-2', 'main');
-    expect(result).toBeNull();
-  });
+    it('isolates by agent_id', () => {
+      insertConvoRow('chat-3', 'assistant', 'main agent prior', 1000, 'main');
+      insertConvoRow('chat-3', 'assistant', 'main agent recent', 1001, 'main');
+      insertConvoRow('chat-3', 'assistant', 'research agent only', 1002, 'research');
 
-  it('isolates by agent_id', () => {
-    insertConvoRow('chat-3', 'assistant', 'main agent prior', 1000, 'main');
-    insertConvoRow('chat-3', 'assistant', 'main agent recent', 1001, 'main');
-    insertConvoRow('chat-3', 'assistant', 'research agent only', 1002, 'research');
-
-    expect(getPreviousAssistantMessage('chat-3', 'main')).toBe('main agent prior');
-    expect(getPreviousAssistantMessage('chat-3', 'research')).toBeNull();
+      expect(getPreviousAssistantMessage('chat-3', 'main')).toBe('main agent prior');
+      expect(getPreviousAssistantMessage('chat-3', 'research')).toBeNull();
+    });
   });
 });

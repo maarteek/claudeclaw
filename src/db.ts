@@ -1174,7 +1174,7 @@ export function getPreviousAssistantMessage(
     .prepare(
       `SELECT content FROM conversation_log
        WHERE chat_id = ? AND agent_id = ? AND role = 'assistant'
-       ORDER BY created_at DESC LIMIT 2`,
+       ORDER BY created_at DESC, id DESC LIMIT 2`,
     )
     .all(chatId, agentId) as Array<{ content: string }>;
   if (rows.length < 2) return null;
