@@ -85,6 +85,22 @@ export interface UsageInfo {
   lastCallInputTokens: number;
 }
 
+/**
+ * One tool invocation captured from the SDK event stream during a runAgent
+ * call. Used by the recommendation gate to determine whether a state-change
+ * proposal in the assistant's response is grounded in tool evidence.
+ *
+ * Shape verified against real SDK output in
+ * docs/superpowers/specs/2026-04-28-claudeclaw-control-improvements-verification.md
+ */
+export interface ToolEvent {
+  toolUseId: string;
+  name: string;            // e.g. "mcp__mcp-torrent-search__search_torrents"
+  isError: boolean;        // true if is_error === true; false otherwise
+  hasResult: boolean;      // false if tool_use seen but tool_result not seen
+  resultPreview: string;   // first ~200 chars of result content
+}
+
 /** Progress event emitted during agent execution for Telegram feedback. */
 export interface AgentProgressEvent {
   type: 'task_started' | 'task_completed' | 'tool_active';
@@ -121,6 +137,7 @@ export interface AgentResult {
   newSessionId: string | undefined;
   usage: UsageInfo | null;
   aborted?: boolean;
+  toolEvents: ToolEvent[];
 }
 
 /**
@@ -359,12 +376,12 @@ export async function runAgent(
   } catch (err) {
     if (abortController?.signal.aborted) {
       logger.info('Agent query aborted by user');
-      return { text: null, newSessionId, usage, aborted: true };
+      return { text: null, newSessionId, usage, aborted: true, toolEvents: [] };
     }
     throw err;
   } finally {
     clearInterval(typingInterval);
   }
 
-  return { text: resultText, newSessionId, usage };
+  return { text: resultText, newSessionId, usage, toolEvents: [] };
 }
