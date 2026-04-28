@@ -1639,17 +1639,29 @@ async function processDashboardMessage(
 
     const rawResponse = result.text?.trim() || 'Done.';
 
+    // Recommendation gate (same wiring as Telegram handler)
+    const gateResult = await gateRecommendation(rawResponse, result.toolEvents);
+    const gatedResponse = gateResult.response;
+
+    if (gateResult.verdict === 'rewrite') {
+      logger.warn({ chatId: chatIdStr, originalLen: rawResponse.length }, 'Recommendation gate rewrote dashboard response');
+    }
+    if (gateResult.verdict === 'fail-open' && gateResult.notification) {
+      // Send a Telegram warning if we have a botApi
+      await botApi.sendMessage(parseInt(chatIdStr), `⚠ ${gateResult.notification}`).catch(() => {});
+    }
+
     // Save conversation turn
-    saveConversationTurn(chatIdStr, text, rawResponse, result.newSessionId ?? sessionId, AGENT_ID);
+    saveConversationTurn(chatIdStr, text, gatedResponse, result.newSessionId ?? sessionId, AGENT_ID);
     if (dashSurfacedIds.length > 0) {
-      void evaluateMemoryRelevance(dashSurfacedIds, dashSummaries, text, rawResponse).catch(() => {});
+      void evaluateMemoryRelevance(dashSurfacedIds, dashSummaries, text, gatedResponse).catch(() => {});
     }
 
     // Emit assistant response to SSE clients
-    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: rawResponse, source: 'dashboard' });
+    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: gatedResponse, source: 'dashboard' });
 
     // Relay to Telegram so the user sees it there too
-    const { text: responseText } = extractFileMarkers(rawResponse);
+    const { text: responseText } = extractFileMarkers(gatedResponse);
     if (responseText) {
       for (const part of splitMessage(formatForTelegram(responseText))) {
         await botApi.sendMessage(parseInt(chatIdStr), part, { parse_mode: 'HTML' });

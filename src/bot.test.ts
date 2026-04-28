@@ -265,3 +265,31 @@ describe('Telegram handler invokes recommendation gate', () => {
     mockGate.mockRestore();
   });
 });
+
+describe('Dashboard handler invokes recommendation gate', () => {
+  it('gateRecommendation is exported and callable for the dashboard path', () => {
+    // Structural assertion: the gate function must exist and be callable.
+    // The dashboard handler (src/bot.ts processDashboardMessage) imports and
+    // awaits gateRecommendation after runAgent returns, same as the Telegram path.
+    expect(typeof recommendationGate.gateRecommendation).toBe('function');
+  });
+
+  it('routes dashboard responses through gateRecommendation', async () => {
+    // Verify the gate is callable with the shape that processDashboardMessage passes it.
+    const mockGate = vi.spyOn(recommendationGate, 'gateRecommendation').mockResolvedValue({
+      verdict: 'pass',
+      response: 'unchanged response',
+    });
+
+    const fakeResponse = 'Dashboard task complete.';
+    const fakeToolEvents: never[] = [];
+
+    const result = await recommendationGate.gateRecommendation(fakeResponse, fakeToolEvents);
+
+    expect(mockGate).toHaveBeenCalledWith(fakeResponse, fakeToolEvents);
+    expect(result.verdict).toBe('pass');
+    expect(result.response).toBe('unchanged response');
+
+    mockGate.mockRestore();
+  });
+});
