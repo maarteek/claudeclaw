@@ -162,6 +162,16 @@ const WARROOM_TEXT_ID_RE = /^wr_[a-z0-9_]{4,64}$/i;
 // Browser crypto.randomUUID() produces lowercase v4 UUIDs. Accept either case.
 const CLIENT_MSG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// Constant-time token comparison (audit fix A4E-1, ported from fork).
+// Plain `===` leaks timing info that lets a remote attacker recover the token
+// one byte at a time. timingSafeEqual takes O(n) regardless of where the
+// mismatch occurs. Length pre-check prevents a panic on differing buffers.
+function safeTokenEqual(provided: string | null | undefined, expected: string | null | undefined): boolean {
+  if (!provided || !expected) return false;
+  if (provided.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+
 /**
  * Build the dashboard Hono app without binding it to a port. Exported for
  * contract tests so the route surface can be exercised via `app.request()`
@@ -171,9 +181,30 @@ const CLIENT_MSG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   const app = new Hono();
 
-  // CORS headers for cross-origin access (Cloudflare tunnel, mobile browsers)
+  // CORS headers for cross-origin access (Cloudflare tunnel, mobile browsers).
+  // Reflect Origin only when it matches a known-good host (audit fix A4E-3,
+  // ported from fork). Wildcard `*` is functionally equivalent to "trust
+  // anyone" for credentialed reads of authenticated endpoints; pinning to
+  // an allowlist closes that surface. The CSRF middleware below provides
+  // the second layer of defense for state-changing requests.
   app.use('*', async (c, next) => {
-    c.header('Access-Control-Allow-Origin', '*');
+    const origin = c.req.header('origin');
+    if (origin) {
+      try {
+        const host = new URL(origin).hostname;
+        const dashHost = DASHBOARD_URL ? new URL(DASHBOARD_URL).hostname : '';
+        const allowed =
+          host === 'localhost' ||
+          host === '127.0.0.1' ||
+          host === '[::1]' ||
+          (!!dashHost && host === dashHost) ||
+          host.endsWith('.trycloudflare.com');
+        if (allowed) {
+          c.header('Access-Control-Allow-Origin', origin);
+          c.header('Vary', 'Origin');
+        }
+      } catch { /* malformed Origin — emit no header */ }
+    }
     c.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, PATCH, OPTIONS');
     c.header('Access-Control-Allow-Headers', 'Content-Type');
     if (c.req.method === 'OPTIONS') return c.body(null, 204);
@@ -276,7 +307,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       return;
     }
     const token = c.req.query('token');
-    if (!DASHBOARD_TOKEN || !token || token !== DASHBOARD_TOKEN) {
+    if (!safeTokenEqual(token, DASHBOARD_TOKEN)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
     await next();
@@ -287,7 +318,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   // by legacy fallbacks that DO embed the token in the page source.
   function requireToken(c: any): Response | null {
     const token = c.req.query('token');
-    if (!DASHBOARD_TOKEN || !token || token !== DASHBOARD_TOKEN) {
+    if (!safeTokenEqual(token, DASHBOARD_TOKEN)) {
       return c.json({ error: 'Unauthorized' }, 401) as Response;
     }
     return null;
@@ -358,11 +389,13 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     if (origin) {
       let host = '';
       try { host = new URL(origin).hostname; } catch { /* malformed */ }
+      // Note: 0.0.0.0 was previously in this allowlist but is a bind
+      // address, never a valid Origin header any browser would send.
+      // Removed (audit fix A4E-3 follow-on, ported from fork-side review).
       const allowed =
         host === 'localhost' ||
         host === '127.0.0.1' ||
         host === '[::1]' ||
-        host === '0.0.0.0' ||
         (!!allowedOriginHost && host === allowedOriginHost);
       if (!allowed) {
         logger.warn({ origin, method, path: new URL(c.req.url).pathname }, 'CSRF: rejected cross-origin request');
@@ -3039,7 +3072,7 @@ export function startDashboard(botApi?: Api<RawApi>): void {
         // Without this, anyone who can reach the dashboard port could
         // proxy into the local Pipecat War Room socket with no auth.
         const token = url.searchParams.get('token');
-        if (!DASHBOARD_TOKEN || token !== DASHBOARD_TOKEN) {
+        if (!safeTokenEqual(token, DASHBOARD_TOKEN)) {
           socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
           socket.destroy();
           return;
