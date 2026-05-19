@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { spawnSync } from 'child_process';
 import yaml from 'js-yaml';
 
 import { STORE_DIR } from './config.js';
@@ -135,4 +136,96 @@ export function writeProviderToYaml(raw: Record<string, unknown>, provider: Prov
 export function parseYamlProvider(filePath: string): ProviderConfig {
   const raw = yaml.load(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
   return readProviderFromYaml(raw);
+}
+
+export interface ProviderAvailability {
+  ok: boolean;
+  /** Human-readable description of the problem. Present when ok is false. */
+  error?: string;
+  /** Shell command the user can copy-paste to install the missing CLI. */
+  installCommand?: string;
+  /** What to do after installing (e.g. authenticate). */
+  setupHint?: string;
+  /** Upstream documentation URL for further reading. */
+  docsUrl?: string;
+}
+
+function commandExists(command: string): boolean {
+  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  return spawnSync(lookup, [command], { stdio: 'pipe' }).status === 0;
+}
+
+/**
+ * Checks whether the CLI required by the given provider is on PATH for the
+ * ClaudeClaw service. Returns structured availability info so callers (wizard,
+ * dashboard preflight, status command) can show actionable install hints
+ * instead of generic spawn ENOENT errors.
+ *
+ * Authentication is intentionally not checked here — providers manage their
+ * own credentials and a CLI that is installed but unauthenticated is still
+ * "available". Auth failures surface later with provider-specific messages
+ * from src/errors.ts.
+ */
+export function checkProviderAvailability(provider: ProviderConfig): ProviderAvailability {
+  switch (provider.type) {
+    case 'claude':
+      if (!commandExists('claude')) {
+        return {
+          ok: false,
+          error: 'Claude Code CLI not found on PATH.',
+          installCommand: 'npm install -g @anthropic-ai/claude-code',
+          setupHint: 'Run `claude login` to authenticate (free, Pro, or Max plan), or set ANTHROPIC_API_KEY in .env for pay-per-token billing.',
+          docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
+        };
+      }
+      return { ok: true };
+    case 'opencode':
+      if (!commandExists('opencode')) {
+        return {
+          ok: false,
+          error: 'OpenCode CLI not found on PATH.',
+          installCommand: 'npm install -g opencode-ai',
+          setupHint: 'Run `opencode auth login` to add provider credentials (OpenAI, Anthropic, GLM, Qwen, DeepSeek, etc.).',
+          docsUrl: 'https://opencode.ai/docs',
+        };
+      }
+      return { ok: true };
+    case 'gemini':
+      if (!commandExists('gemini')) {
+        return {
+          ok: false,
+          error: 'Gemini CLI not found on PATH.',
+          installCommand: 'npm install -g @google/gemini-cli',
+          setupHint: 'Run `gemini` once after install to authenticate with your Google account.',
+          docsUrl: 'https://github.com/google-gemini/gemini-cli',
+        };
+      }
+      return { ok: true };
+    case 'codex':
+      if (!commandExists('codex')) {
+        return {
+          ok: false,
+          error: 'Codex CLI not found on PATH (required by the bundled codex-acp adapter).',
+          installCommand: 'npm install -g @openai/codex',
+          setupHint: 'Run `codex` once after install to authenticate with your OpenAI account.',
+          docsUrl: 'https://github.com/openai/codex',
+        };
+      }
+      return { ok: true };
+    case 'acp': {
+      if (!provider.command?.trim()) {
+        return { ok: false, error: 'Custom ACP provider requires a command.' };
+      }
+      if (!commandExists(provider.command)) {
+        return {
+          ok: false,
+          error: `Custom ACP command "${provider.command}" not found on PATH.`,
+          setupHint: 'Install and authenticate the provider, then make sure the command is on PATH for the ClaudeClaw service. Restart with `pm2 restart claudeclaw --update-env` to refresh PATH if you just installed it.',
+        };
+      }
+      return { ok: true };
+    }
+    default:
+      return { ok: true };
+  }
 }

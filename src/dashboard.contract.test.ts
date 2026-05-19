@@ -15,7 +15,23 @@
 
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+
+// Provider preflight (src/provider.ts) shells out to `where`/`which` to test
+// PATH presence. Contract tests assert HTTP response shape and must not depend
+// on which CLIs happen to be installed on the CI host, so stub spawnSync to
+// claim every command exists. Other child_process exports pass through so we
+// don't break unrelated modules (bot.ts execFile, voice.ts execFile, etc.).
+// dashboard.ts uses spawnSync only for `opencode models`; an empty stdout
+// there is already a handled real-world case, so the stub is safe.
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    spawnSync: vi.fn(() => ({ status: 0, stdout: '', stderr: '' })),
+  };
+});
+
 import { _initTestDatabase } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
 import { STORE_DIR } from './config.js';

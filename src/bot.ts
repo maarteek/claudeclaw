@@ -1836,7 +1836,10 @@ async function processDashboardMessage(
   } catch (err) {
     setActiveAbort(chatIdStr, null);
     logger.error({ err }, 'Dashboard message processing error');
-    emitChatEvent({ type: 'error', chatId: chatIdStr, content: 'Something went wrong. Check the logs.' });
+    const userMessage = err instanceof AgentError
+      ? err.recovery.userMessage
+      : 'Something went wrong. Check the logs.';
+    emitChatEvent({ type: 'error', chatId: chatIdStr, content: userMessage });
   } finally {
     setProcessing(chatIdStr, false);
   }

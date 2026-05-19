@@ -263,17 +263,18 @@ type SetupProviderType = Extract<ProviderType, 'claude' | 'opencode' | 'gemini' 
 async function configureProvider(): Promise<SetupProviderType> {
   section('Provider');
   info('Choose the agent backend ClaudeClaw should use for the main bot.');
-  info('ACP providers use their own auth and model config; Claude uses Claude Code auth.');
+  info('Claude is the default. Non-Claude providers are BETA and gated by ENABLE_ACP=true');
+  info('in .env — picking one below opts you in.');
   console.log();
 
-  bullet('1. Claude');
-  bullet('2. OpenCode (default)');
-  bullet('3. Gemini CLI');
-  bullet('4. Codex ACP adapter');
-  bullet('5. Custom ACP command');
+  bullet('1. Claude (default, stable)');
+  bullet('2. OpenCode (beta)');
+  bullet('3. Gemini CLI (beta)');
+  bullet('4. Codex ACP adapter (beta)');
+  bullet('5. Custom ACP command (beta)');
   console.log();
 
-  const answer = (await ask('Select provider', '2')).toLowerCase();
+  const answer = (await ask('Select provider', '1')).toLowerCase();
   let choice: SetupProviderType;
   if (answer === '1' || answer === 'claude' || answer === 'c') {
     choice = 'claude';
@@ -286,8 +287,8 @@ async function configureProvider(): Promise<SetupProviderType> {
   } else if (answer === '5' || answer === 'acp' || answer === 'custom') {
     choice = 'acp';
   } else {
-    warn(`Unknown provider "${answer}". Using OpenCode.`);
-    choice = 'opencode';
+    warn(`Unknown provider "${answer}". Using Claude.`);
+    choice = 'claude';
   }
 
   if (choice === 'claude') {
@@ -1114,6 +1115,8 @@ async function main() {
     '# ── Features ──────────────────────────────────────────────────',
     (wantWarRoom && warRoomReady) ? 'WARROOM_ENABLED=true' : '# WARROOM_ENABLED=false',
     wantWhatsApp ? 'WHATSAPP_ENABLED=true' : '# WHATSAPP_ENABLED=false',
+    '# Provider selection (beta). Set to true to expose OpenCode/Gemini/Codex/custom ACP.',
+    selectedProvider === 'claude' ? 'ENABLE_ACP=false' : 'ENABLE_ACP=true',
     '',
     '# ── Dashboard ─────────────────────────────────────────────────',
     `DASHBOARD_TOKEN=${env.DASHBOARD_TOKEN || ''}`,
@@ -1131,7 +1134,7 @@ async function main() {
   ];
 
   // Preserve unknown keys
-  const known = new Set(['TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED','WARROOM_ENABLED','DB_ENCRYPTION_KEY','DASHBOARD_TOKEN','DASHBOARD_PORT','DASHBOARD_URL','SECURITY_PIN_HASH','IDLE_LOCK_MINUTES','EMERGENCY_KILL_PHRASE','DESTRUCTIVE_CONFIRM']);
+  const known = new Set(['TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED','WARROOM_ENABLED','ENABLE_ACP','DB_ENCRYPTION_KEY','DASHBOARD_TOKEN','DASHBOARD_PORT','DASHBOARD_URL','SECURITY_PIN_HASH','IDLE_LOCK_MINUTES','EMERGENCY_KILL_PHRASE','DESTRUCTIVE_CONFIRM']);
   for (const [k, v] of Object.entries(env)) {
     if (!known.has(k) && v) lines.push(`${k}=${v}`);
   }

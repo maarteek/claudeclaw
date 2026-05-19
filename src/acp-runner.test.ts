@@ -130,22 +130,39 @@ function writeFakeOpenCode(mode: string): { oldPath: string } {
 }
 
 function writeFakePresetCommand(command: string, expectedArgs: string[], mode: string): { oldPath: string } {
+  const isWindows = process.platform === 'win32';
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudeclaw-opencode-test-'));
   tmpDirs.push(dir);
   const agentScript = writeFakeAcpAgent(mode);
-  const bin = path.join(dir, command);
-  const argAssertions = expectedArgs
-    .map((arg, idx) => `test "$${idx + 1}" = ${JSON.stringify(arg)} || exit 42`)
-    .join('\n');
-  const arityAssertion = `test "$#" = "${expectedArgs.length}" || exit 42`;
-  fs.writeFileSync(bin, [
-    '#!/usr/bin/env sh',
-    arityAssertion,
-    argAssertions,
-    `exec "${process.execPath}" "${agentScript}"`,
-    '',
-  ].join('\n'), 'utf-8');
-  fs.chmodSync(bin, 0o755);
+  const bin = path.join(dir, isWindows ? `${command}.cmd` : command);
+  
+  if (isWindows) {
+    const argChecks = expectedArgs
+      .map((arg, idx) => `if not "%${idx + 1}%" == "${arg}" exit /b 42`)
+      .join('\n');
+    const arityCheck = `if not "%${expectedArgs.length + 1}%" == "" if not "%${expectedArgs.length}%" == "" (if not "%${expectedArgs.length + 1}%" == "" exit /b 42)`;
+    // Simpler arity check for cmd
+    const content = [
+      '@echo off',
+      argChecks,
+      `"${process.execPath}" "${agentScript}" %*`,
+    ].join('\r\n');
+    fs.writeFileSync(bin, content, 'utf-8');
+  } else {
+    const argAssertions = expectedArgs
+      .map((arg, idx) => `test "$${idx + 1}" = ${JSON.stringify(arg)} || exit 42`)
+      .join('\n');
+    const arityAssertion = `test "$#" = "${expectedArgs.length}" || exit 42`;
+    fs.writeFileSync(bin, [
+      '#!/usr/bin/env sh',
+      arityAssertion,
+      argAssertions,
+      `exec "${process.execPath}" "${agentScript}"`,
+      '',
+    ].join('\n'), 'utf-8');
+    fs.chmodSync(bin, 0o755);
+  }
+  
   const oldPath = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${oldPath}`;
   return { oldPath };

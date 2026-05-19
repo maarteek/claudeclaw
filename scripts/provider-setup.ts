@@ -6,6 +6,7 @@ import readline from 'readline';
 import { spawnSync } from 'child_process';
 
 import {
+  checkProviderAvailability,
   setMainProviderConfig,
   providerToYaml,
   type ProviderConfig,
@@ -26,11 +27,6 @@ async function confirm(question: string, defaultYes = true): Promise<boolean> {
   const ans = (await ask(`${question} [${defaultYes ? 'Y/n' : 'y/N'}]`)).toLowerCase();
   if (!ans) return defaultYes;
   return ans === 'y' || ans === 'yes';
-}
-
-function commandExists(command: string): boolean {
-  const check = process.platform === 'win32' ? ['where', command] : ['which', command];
-  return spawnSync(check[0], [check[1]], { stdio: 'pipe' }).status === 0;
 }
 
 function stripAnsi(s: string): string {
@@ -147,10 +143,16 @@ async function main(): Promise<void> {
 
   const provider = await selectProvider();
 
+  const availability = checkProviderAvailability(provider);
+  if (!availability.ok) {
+    const lines = [availability.error ?? 'Provider CLI not found.'];
+    if (availability.installCommand) lines.push(`Install: ${availability.installCommand}`);
+    if (availability.setupHint) lines.push(availability.setupHint);
+    if (availability.docsUrl) lines.push(`Docs: ${availability.docsUrl}`);
+    throw new Error(`${lines.join('\n  ')}\n\nRe-run npm run provider:setup after fixing.`);
+  }
+
   if (provider.type === 'opencode') {
-    if (!commandExists('opencode')) {
-      throw new Error('OpenCode CLI not found. Install it, then re-run npm run provider:setup.');
-    }
     const credentialCount = getOpenCodeCredentialCount();
     if (credentialCount && credentialCount > 0) {
       console.log(`OpenCode auth found (${credentialCount} credential${credentialCount === 1 ? '' : 's'}).`);
@@ -170,20 +172,9 @@ async function main(): Promise<void> {
       console.log('Keeping OpenCode current default model.');
     }
   } else if (provider.type === 'gemini') {
-    if (!commandExists('gemini')) {
-      throw new Error('Gemini CLI not found. Install and authenticate Gemini CLI, then re-run npm run provider:setup.');
-    }
     console.log('Gemini CLI found. Auth and model selection stay in Gemini CLI.');
   } else if (provider.type === 'codex') {
-    if (!commandExists('codex-acp')) {
-      throw new Error('codex-acp adapter not found. Install and authenticate the Codex ACP adapter, then re-run npm run provider:setup.');
-    }
-    console.log('codex-acp adapter found. Auth and model selection stay in the adapter/Codex config.');
-  } else if (provider.type === 'acp') {
-    if (!provider.command) throw new Error('Custom ACP provider requires a command.');
-    if (!commandExists(provider.command)) {
-      console.warn(`Command "${provider.command}" was not found on PATH right now.`);
-    }
+    console.log('Codex CLI found. ClaudeClaw uses the bundled codex-acp adapter to connect.');
   }
 
   const targets = target === 'all' ? agents : [target];

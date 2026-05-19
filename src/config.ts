@@ -38,6 +38,7 @@ const envConfig = readEnvFile([
   'WARROOM_ENABLED',
   'WARROOM_PORT',
   'STREAM_STRATEGY',
+  'ENABLE_ACP',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -263,6 +264,14 @@ export const PROTECTED_ENV_VARS = (
   process.env.PROTECTED_ENV_VARS || envConfig.PROTECTED_ENV_VARS ||
   'ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DB_ENCRYPTION_KEY,TELEGRAM_BOT_TOKEN,SLACK_USER_TOKEN,GROQ_API_KEY,ELEVENLABS_API_KEY,GOOGLE_API_KEY'
 ).split(',').map((s) => s.trim()).filter(Boolean);
+
+// ── Provider Selection (BETA) ───────────────────────────────────────
+// Gates the alternate provider (ACP / OpenCode / Gemini / Codex) UI and
+// runtime. When false, the dashboard hides the provider picker and the
+// engine forces Claude regardless of what's saved in agent.yaml or
+// main-config.json. Existing installs without this var see no change.
+export const ENABLE_ACP =
+  (process.env.ENABLE_ACP || envConfig.ENABLE_ACP || 'false').toLowerCase() === 'true';
 
 // ── War Room (voice meeting via Pipecat WebSocket) ──────────────────
 export const WARROOM_ENABLED =

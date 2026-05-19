@@ -404,10 +404,16 @@ export async function inspectAcpProviderRuntimeOptions(
   timeoutMs = 5000,
 ): Promise<AcpProviderRuntimeOptions> {
   const { command, args } = getAcpCommand(provider);
+  const isWindows = process.platform === 'win32';
+  // On Windows, absolute paths with spaces fail when shell: true because 
+  // cmd.exe splits on the space. We only need the shell for searching 
+  // the PATH for non-absolute commands (like 'opencode').
+  const useShell = isWindows && !path.isAbsolute(command);
   const child = spawn(command, args, {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: getAcpEnv(),
+    shell: useShell,
   });
   const spawnErrorPromise = new Promise<never>((_, reject) => {
     child.once('error', (err: NodeJS.ErrnoException) => {
@@ -476,10 +482,16 @@ export class AcpEngineAdapter implements AgentEngine {
   async *invoke(input: AgentTurnInput): AsyncIterable<AgentEngineEvent> {
     const { command, args } = getAcpCommand(input.provider);
     const pending: AgentEngineEvent[] = [];
+    const isWindows = process.platform === 'win32';
+    // On Windows, absolute paths with spaces fail when shell: true because 
+    // cmd.exe splits on the space. We only need the shell for searching 
+    // the PATH for non-absolute commands (like 'opencode').
+    const useShell = isWindows && !path.isAbsolute(command);
     const child = spawn(command, args, {
       cwd: input.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: getAcpEnv(input.env),
+      shell: useShell,
     });
     const spawnErrorPromise = new Promise<never>((_, reject) => {
       child.once('error', (err: NodeJS.ErrnoException) => {
@@ -734,6 +746,12 @@ export class AcpEngineAdapter implements AgentEngine {
         yield { type: 'aborted', text: client.text || null, sessionId: input.sessionId, usage: emptyUsage() };
         return;
       }
+
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('connection closed') && stderr.includes('is not recognized as an internal or external command')) {
+        throw new Error(`Failed to start ACP provider command "${command}": ${stderr.trim()}`);
+      }
+
       logger.error({ err, stderr }, 'ACP provider query failed');
       const data = (err as { data?: { details?: unknown } })?.data;
       if (typeof data?.details === 'string') throw new Error(data.details);

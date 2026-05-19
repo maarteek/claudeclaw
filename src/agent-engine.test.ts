@@ -7,6 +7,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 vi.mock('./config.js', () => ({
   PROJECT_ROOT: '/tmp/test',
   agentCwd: undefined,
+  ENABLE_ACP: true,
 }));
 
 vi.mock('./logger.js', () => ({

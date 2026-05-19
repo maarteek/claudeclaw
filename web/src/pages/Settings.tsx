@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { Toggle } from '@/components/Toggle';
 import { invalidateFetchCache, useFetch, type FetchState } from '@/lib/useFetch';
-import { apiPatch, apiPost } from '@/lib/api';
+import { ApiError, apiPatch, apiPost } from '@/lib/api';
 import { pushToast } from '@/lib/toasts';
 import {
   theme, themeMeta, setTheme, type ThemeName,
@@ -28,6 +28,7 @@ interface Health {
   provider?: { type: string; command?: string; args?: string[]; model?: string; runtimeMode?: RuntimeMode; thinkingMode?: ThinkingMode };
   providerType?: string;
   runtime?: string;
+  acpEnabled?: boolean;
 }
 
 interface SecurityStatus { [key: string]: any; }
@@ -145,14 +146,16 @@ export function Settings() {
             </Card>
           </Section>
 
-          <Section
-            title="Agent provider"
-            subtitle="Choose a built-in provider or point ClaudeClaw at any ACP-compatible agent command."
-          >
-            <Card>
-              <ProviderConfigPanel health={health} />
-            </Card>
-          </Section>
+          {health.data?.acpEnabled ? (
+            <Section
+              title="Agent provider (beta)"
+              subtitle="Provider selection is beta. Additional CLI setup may be required for non-Claude providers. Choose a built-in provider or point ClaudeClaw at any ACP-compatible agent command."
+            >
+              <Card>
+                <ProviderConfigPanel health={health} />
+              </Card>
+            </Section>
+          ) : null}
 
           <Section
             title="Kill switches"
@@ -518,7 +521,23 @@ function ProviderConfigPanel({ health }: { health: FetchState<Health> }) {
       dirtyRef.current = false;
       pushToast({ tone: 'success', title: 'Provider saved', description: 'Takes effect on the next message.' });
     } catch (err: any) {
-      pushToast({ tone: 'error', title: 'Provider save failed', description: err?.message || String(err), durationMs: 7000 });
+      // Surface structured availability errors from the preflight check so the
+      // user sees install commands and setup hints instead of a generic 400.
+      if (err instanceof ApiError && err.body && typeof err.body === 'object') {
+        const body = err.body as { error?: string; installCommand?: string; setupHint?: string; docsUrl?: string };
+        const descriptionParts = [body.error || `Request failed: ${err.status}`];
+        if (body.installCommand) descriptionParts.push(`Install: ${body.installCommand}`);
+        if (body.setupHint) descriptionParts.push(body.setupHint);
+        if (body.docsUrl) descriptionParts.push(`Docs: ${body.docsUrl}`);
+        pushToast({
+          tone: 'error',
+          title: 'Provider not available',
+          description: descriptionParts.join('\n'),
+          durationMs: 12000,
+        });
+      } else {
+        pushToast({ tone: 'error', title: 'Provider save failed', description: err?.message || String(err), durationMs: 7000 });
+      }
     } finally {
       setBusy(false);
     }

@@ -7,7 +7,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG, updateAgentProvider } from './config.js';
+import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, ENABLE_ACP, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG, updateAgentProvider } from './config.js';
 import crypto from 'crypto';
 import {
   getAllScheduledTasks,
@@ -107,6 +107,7 @@ import {
   DEFAULT_CODEX_MODEL,
   ProviderConfig,
   getProviderDisplay,
+  checkProviderAvailability,
   getMainProviderConfig,
   normalizeProviderConfig,
   setMainProviderConfig,
@@ -268,6 +269,9 @@ function getProviderStatus() {
             : 'ACP',
     runtime: getProviderDisplay(provider),
     model,
+    // Surfaced so the dashboard can hide the provider picker when the
+    // beta ACP feature is off. Single source of truth for the UI.
+    acpEnabled: ENABLE_ACP,
   };
 }
 
@@ -2220,6 +2224,9 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/api/providers/models', (c) => {
     const provider = (c.req.query('provider') || '').toLowerCase();
     const current = getMainProviderConfig();
+    if (!ENABLE_ACP && provider !== 'claude') {
+      return c.json({ error: 'Provider selection is disabled. Set ENABLE_ACP=true in .env to enable (beta).' }, 403);
+    }
     if (provider === 'claude') {
       return c.json({
         provider,
@@ -2279,6 +2286,9 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
 
   app.get('/api/providers/runtime-options', async (c) => {
     const providerType = (c.req.query('provider') || '').toLowerCase();
+    if (!ENABLE_ACP && providerType !== 'claude') {
+      return c.json({ error: 'Provider selection is disabled. Set ENABLE_ACP=true in .env to enable (beta).' }, 403);
+    }
     const current = getMainProviderConfig();
     const hasCommandOverride = c.req.query('command') !== undefined || c.req.query('args') !== undefined;
     const base: ProviderConfig = providerType === current.type && !hasCommandOverride
@@ -2331,8 +2341,24 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       args: body.args,
     };
     const provider = normalizeProviderConfig(candidate);
+    if (!ENABLE_ACP && provider.type !== 'claude') {
+      return c.json({ error: 'Provider selection is disabled. Set ENABLE_ACP=true in .env to enable (beta).' }, 403);
+    }
     const validationError = validateProviderConfig(provider);
     if (validationError) return c.json({ error: validationError }, 400);
+
+    // Preflight: if the provider's CLI is not installed, fail fast with an
+    // actionable response so the user can install it before the next chat
+    // turn crashes with a spawn ENOENT they can't easily decode.
+    const availability = checkProviderAvailability(provider);
+    if (!availability.ok) {
+      return c.json({
+        error: availability.error,
+        installCommand: availability.installCommand,
+        setupHint: availability.setupHint,
+        docsUrl: availability.docsUrl,
+      }, 400);
+    }
 
     try {
       if (agentId === 'main') {

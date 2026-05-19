@@ -12,6 +12,7 @@ vi.mock('./config.js', () => ({
   PROJECT_ROOT: '/tmp/test',
   agentCwd: undefined,
   agentProvider: state.activeProvider,
+  ENABLE_ACP: true,
 }));
 
 vi.mock('./env.js', () => ({

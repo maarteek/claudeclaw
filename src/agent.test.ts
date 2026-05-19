@@ -14,6 +14,7 @@ vi.mock('./config.js', () => ({
   AGENT_MAX_TURNS: 30,
   PROJECT_ROOT: '/tmp/test',
   agentCwd: undefined,
+  ENABLE_ACP: true,
 }));
 
 vi.mock('./logger.js', () => ({
