@@ -12,6 +12,24 @@ import {
 
 export const DEFAULT_MAIN_DESCRIPTION = 'Primary ClaudeClaw bot';
 
+/** Capitalize first letter of a string. Used as fallback display name. */
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Resolve display name for an agent. Reads from agent.yaml `name` field,
+ * falls back to capitalized id (e.g. "main" -> "Main"). Never throws.
+ */
+export function resolveAgentDisplayName(agentId: string): string {
+  try {
+    const cfg = loadAgentConfig(agentId);
+    return cfg.name || capitalize(agentId);
+  } catch {
+    return capitalize(agentId);
+  }
+}
+
 function mainConfigPath(): string {
   return path.join(STORE_DIR, 'main-config.json');
 }
@@ -126,18 +144,24 @@ export function loadAgentConfig(agentId: string): AgentConfig {
 
   const name = raw['name'] as string;
   const description = (raw['description'] as string) ?? '';
-  const botTokenEnv = raw['telegram_bot_token_env'] as string;
+  const botTokenEnv = (raw['telegram_bot_token_env'] as string) || (agentId === 'main' ? 'TELEGRAM_BOT_TOKEN' : '');
   const model = raw['model'] as string | undefined;
   const provider = readProviderFromYaml(raw);
 
-  if (!name || !botTokenEnv) {
-    throw new Error(`Agent config ${configPath} must have 'name' and 'telegram_bot_token_env'`);
+  if (!name) {
+    throw new Error(`Agent config ${configPath} must have 'name'`);
+  }
+  if (!botTokenEnv && agentId !== 'main') {
+    throw new Error(`Agent config ${configPath} must have 'telegram_bot_token_env'`);
   }
 
-  const env = readEnvFile([botTokenEnv]);
-  const botToken = process.env[botTokenEnv] || env[botTokenEnv] || '';
-  if (!botToken) {
-    throw new Error(`Bot token not found: set ${botTokenEnv} in .env`);
+  let botToken = '';
+  if (botTokenEnv) {
+    const env = readEnvFile([botTokenEnv]);
+    botToken = process.env[botTokenEnv] || env[botTokenEnv] || '';
+    if (!botToken && agentId !== 'main') {
+      throw new Error(`Bot token not found: set ${botTokenEnv} in .env`);
+    }
   }
 
   let obsidian: AgentConfig['obsidian'];
@@ -332,11 +356,10 @@ export function refreshWarRoomRoster(): void {
     const ids = ['main', ...listAgentIds().filter((id) => id !== 'main')];
     const roster = ids.map((id) => {
       try {
-        if (id === 'main') return { id: 'main', name: 'Main', description: 'General ops and triage' };
         const cfg = loadAgentConfig(id);
-        return { id, name: cfg.name || id, description: cfg.description || '' };
+        return { id, name: cfg.name || capitalize(id), description: cfg.description || '' };
       } catch {
-        return { id, name: id, description: '' };
+        return { id, name: capitalize(id), description: '' };
       }
     });
     fs.writeFileSync(WARROOM_ROSTER_PATH, JSON.stringify(roster, null, 2));

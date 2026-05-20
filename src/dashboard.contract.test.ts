@@ -15,7 +15,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import yaml from 'js-yaml';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 
 // Provider preflight (src/provider.ts) shells out to `where`/`which` to test
 // PATH presence. Contract tests assert HTTP response shape and must not depend
@@ -34,7 +35,7 @@ vi.mock('child_process', async () => {
 
 import { _initTestDatabase } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
-import { STORE_DIR } from './config.js';
+import { STORE_DIR, CLAUDECLAW_CONFIG } from './config.js';
 import type { Hono } from 'hono';
 
 const TOKEN = 'test-contract-token';
@@ -663,6 +664,45 @@ describe('GET /api/warroom/agents', () => {
       name: expect.any(String),
       description: expect.any(String),
     });
+  });
+});
+
+describe('display name resolution', () => {
+  // Write a main agent.yaml with name: Felix into the sandboxed
+  // CLAUDECLAW_CONFIG so the dashboard resolves main's display name
+  // from config instead of falling back to the hardcoded 'Main'.
+  const mainAgentDir = path.join(CLAUDECLAW_CONFIG, 'agents', 'main');
+  const mainAgentYaml = path.join(mainAgentDir, 'agent.yaml');
+
+  beforeAll(() => {
+    fs.mkdirSync(mainAgentDir, { recursive: true });
+    fs.writeFileSync(
+      mainAgentYaml,
+      yaml.dump({ name: 'Felix', description: 'Test hub agent' }),
+      'utf-8',
+    );
+  });
+
+  afterAll(() => {
+    try { fs.rmSync(mainAgentDir, { recursive: true, force: true }); } catch { /* ok */ }
+  });
+
+  it('GET /api/agents returns the configured name for main', async () => {
+    const res = await get('/api/agents');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    const main = body.agents.find((a: { id: string }) => a.id === 'main');
+    expect(main).toBeDefined();
+    expect(main.name).toBe('Felix');
+  });
+
+  it('GET /api/warroom/agents returns the configured name for main', async () => {
+    const res = await get('/api/warroom/agents');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    const main = body.agents.find((a: { id: string }) => a.id === 'main');
+    expect(main).toBeDefined();
+    expect(main.name).toBe('Felix');
   });
 });
 

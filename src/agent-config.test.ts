@@ -141,6 +141,73 @@ describe('main description', () => {
   });
 });
 
+describe('resolveAgentDisplayName', () => {
+  it('returns the configured name when agent.yaml has a name field', async () => {
+    writeAgentYaml('felix', {
+      name: 'Felix',
+      description: 'Test agent',
+      telegram_bot_token_env: 'TEST_BOT_TOKEN',
+    });
+
+    const { resolveAgentDisplayName } = await import('./agent-config.js');
+    expect(resolveAgentDisplayName('felix')).toBe('Felix');
+  });
+
+  it('returns capitalized id when agent.yaml has no name field', async () => {
+    // Write a minimal agent.yaml with name set (required by loadAgentConfig)
+    // but test the fallback path by writing yaml without name
+    const agentDir = path.join(projectRoot, 'agents', 'noname');
+    fs.mkdirSync(agentDir, { recursive: true });
+    // loadAgentConfig requires 'name', so if name is missing it throws.
+    // resolveAgentDisplayName catches the throw and falls back to capitalize(id).
+    fs.writeFileSync(
+      path.join(agentDir, 'agent.yaml'),
+      yaml.dump({ description: 'no name here', telegram_bot_token_env: 'TEST_BOT_TOKEN' }),
+      'utf-8',
+    );
+
+    const { resolveAgentDisplayName } = await import('./agent-config.js');
+    expect(resolveAgentDisplayName('noname')).toBe('Noname');
+  });
+
+  it('returns capitalized id when agent.yaml does not exist (no throw)', async () => {
+    const { resolveAgentDisplayName } = await import('./agent-config.js');
+    // 'ghost' has no agent.yaml anywhere
+    expect(resolveAgentDisplayName('ghost')).toBe('Ghost');
+  });
+});
+
+describe('loadAgentConfig main fallback', () => {
+  it('succeeds without telegram_bot_token_env when TELEGRAM_BOT_TOKEN env var is set', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'fallback-token';
+
+    writeAgentYaml('main', {
+      name: 'Holden',
+      description: 'Hub agent',
+      // No telegram_bot_token_env - should fall back to TELEGRAM_BOT_TOKEN
+    });
+
+    const { loadAgentConfig } = await import('./agent-config.js');
+    const config = loadAgentConfig('main');
+    expect(config.name).toBe('Holden');
+    expect(config.botToken).toBe('fallback-token');
+
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('uses the name from agent.yaml', async () => {
+    writeAgentYaml('main', {
+      name: 'Holden',
+      description: 'Hub agent',
+      telegram_bot_token_env: 'TEST_BOT_TOKEN',
+    });
+
+    const { loadAgentConfig } = await import('./agent-config.js');
+    const config = loadAgentConfig('main');
+    expect(config.name).toBe('Holden');
+  });
+});
+
 describe('provider config', () => {
   it('keeps legacy installs on Claude when no provider is configured', async () => {
     const { getMainProviderConfig } = await import('./provider.js');

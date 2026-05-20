@@ -76,6 +76,7 @@ import {
   listAgentIds,
   loadAgentConfig,
   resolveAgentDir,
+  resolveAgentDisplayName,
   setAgentModel,
   setAgentProvider,
   getMainDescription,
@@ -849,11 +850,10 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const ids = ['main', ...listAgentIds().filter((id) => id !== 'main')];
     const agents = ids.map((id) => {
       try {
-        if (id === 'main') return { id: 'main', name: 'Main', description: 'General ops and triage' };
         const cfg = loadAgentConfig(id);
-        return { id, name: cfg.name || id, description: cfg.description || '' };
+        return { id, name: cfg.name || resolveAgentDisplayName(id), description: cfg.description || '' };
       } catch {
-        return { id, name: id, description: '' };
+        return { id, name: resolveAgentDisplayName(id), description: '' };
       }
     });
     return c.json({ agents });
@@ -1550,6 +1550,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       }
       return {
         agent,
+        display_name: resolveAgentDisplayName(agent),
         gemini_voice: geminiVoice,
         voice_id: entry.voice_id || '',
         name: entry.name || '',
@@ -2075,11 +2076,13 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   // List all configured agents with status
   app.get('/api/agents', (c) => {
     const agentIds = listAgentIds();
+    const hasMain = agentIds.includes('main');
     const agents = agentIds.map((id) => {
       try {
         const config = loadAgentConfig(id);
-        // Check if agent process is alive via PID file
-        const pidFile = path.join(STORE_DIR, `agent-${id}.pid`);
+        // Check if agent process is alive via PID file.
+        // Main agent uses 'claudeclaw.pid'; others use 'agent-<id>.pid'.
+        const pidFile = path.join(STORE_DIR, id === 'main' ? 'claudeclaw.pid' : `agent-${id}.pid`);
         let running = false;
         if (fs.existsSync(pidFile)) {
           try {
@@ -2095,48 +2098,56 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
           : provider.model;
         return {
           id,
-          name: config.name,
-          description: config.description,
+          name: config.name || resolveAgentDisplayName(id),
+          description: id === 'main' ? getMainDescription() : config.description,
           model,
           provider,
           running,
           todayTurns: stats.todayTurns,
           todayCost: stats.todayCost,
-          // Cache-bust token for <img> URLs across all surfaces. Derived
-          // from filesystem mtime+size of the resolved avatar — changes
-          // the moment a user upload or Telegram fetch lands.
           avatar_etag: avatarEtagForId(id),
         };
       } catch {
-        return { id, name: id, description: '', model: 'unknown', provider: { type: 'opencode' }, running: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
+        const fallbackName = resolveAgentDisplayName(id);
+        return { id, name: fallbackName, description: '', model: 'unknown', provider: { type: 'opencode' }, running: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
       }
     });
 
-    // Include main bot too
-    const mainPidFile = path.join(STORE_DIR, 'claudeclaw.pid');
-    let mainRunning = false;
-    if (fs.existsSync(mainPidFile)) {
-      try {
-        const pid = parseInt(fs.readFileSync(mainPidFile, 'utf-8').trim(), 10);
-        mainRunning = isProcessAlive(pid);
-      } catch { /* not running */ }
+    // Ensure main is always first and never duplicated.
+    let allAgents;
+    if (hasMain) {
+      // main exists in agentIds — move it to the front
+      allAgents = [
+        ...agents.filter((a) => a.id === 'main'),
+        ...agents.filter((a) => a.id !== 'main'),
+      ];
+    } else {
+      // No agents/main/agent.yaml — build a main entry from env/defaults
+      const mainPidFile = path.join(STORE_DIR, 'claudeclaw.pid');
+      let mainRunning = false;
+      if (fs.existsSync(mainPidFile)) {
+        try {
+          const pid = parseInt(fs.readFileSync(mainPidFile, 'utf-8').trim(), 10);
+          mainRunning = isProcessAlive(pid);
+        } catch { /* not running */ }
+      }
+      const mainStats = getAgentTokenStats('main');
+      const mainProvider = getMainProviderConfig();
+      allAgents = [
+        {
+          id: 'main',
+          name: resolveAgentDisplayName('main'),
+          description: getMainDescription(),
+          model: getProviderStatus().model,
+          provider: mainProvider,
+          running: mainRunning,
+          todayTurns: mainStats.todayTurns,
+          todayCost: mainStats.todayCost,
+          avatar_etag: avatarEtagForId('main'),
+        },
+        ...agents,
+      ];
     }
-    const mainStats = getAgentTokenStats('main');
-    const mainProvider = getMainProviderConfig();
-    const allAgents = [
-      {
-        id: 'main',
-        name: 'Main',
-        description: getMainDescription(),
-        model: getProviderStatus().model,
-        provider: mainProvider,
-        running: mainRunning,
-        todayTurns: mainStats.todayTurns,
-        todayCost: mainStats.todayCost,
-        avatar_etag: avatarEtagForId('main'),
-      },
-      ...agents,
-    ];
 
     return c.json({ agents: allAgents });
   });

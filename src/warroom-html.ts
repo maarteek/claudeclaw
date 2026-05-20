@@ -1333,7 +1333,7 @@ function _renderPin() {
   });
 }
 
-var AGENT_LABELS = { main: 'Main', research: 'Research', comms: 'Comms', content: 'Content', ops: 'Ops' };
+var AGENT_LABELS = {};
 
 // Switching-in-progress guard so a rapid double-click doesn't spawn two
 // reconnect cycles.
@@ -1379,7 +1379,7 @@ async function togglePin(agentId) {
     // 1. Optimistic UI update
     pinnedAgent = targetAgent;
     _renderPin();
-    var statusLabel = targetAgent ? (AGENT_LABELS[targetAgent] || targetAgent) : 'Main';
+    var statusLabel = targetAgent ? (AGENT_LABELS[targetAgent] || targetAgent) : (AGENT_LABELS['main'] || 'Main');
     addTranscriptEntry('system', 'Switching to ' + statusLabel + '...');
     document.getElementById('statusText').textContent = 'switching to ' + statusLabel + '...';
 
@@ -1526,7 +1526,7 @@ var AGENT_ROLES = {
   content: 'The Royal Bard',
   ops: 'Master of War',
 };
-var AGENT_LABELS = AGENT_LABELS || {};
+// AGENT_LABELS populated dynamically by loadAgentCards()
 
 // HTML-escape user-controlled strings before injecting into innerHTML.
 // Agent name/description come from agent.yaml files which the dashboard
@@ -1570,6 +1570,11 @@ function loadAgentCards() {
         // Fade in
         setTimeout(function(){ card.style.opacity = '1'; card.style.transform = 'translateX(0)'; }, 50);
         container.appendChild(card);
+      });
+      // Update stage nameplates with display names from the API
+      data.agents.forEach(function(agent) {
+        var el = document.querySelector('.stage-avatar[data-agent="' + agent.id + '"] .stage-nameplate');
+        if (el) el.textContent = (agent.name || agent.id).toUpperCase();
       });
     })
     .catch(function(e){ console.error('[WarRoom] Failed to load agents:', e); });
@@ -1729,7 +1734,7 @@ window.addEventListener('beforeunload', __warRoomCleanup);
 async function toggleMeeting() {
   var btn = document.getElementById('meetingBtn');
   if (!meetingActive) {
-    var agentLabel = pinnedAgent ? (AGENT_LABELS[pinnedAgent] || pinnedAgent) : 'Main';
+    var agentLabel = pinnedAgent ? (AGENT_LABELS[pinnedAgent] || pinnedAgent) : (AGENT_LABELS['main'] || 'Main');
     btn.textContent = 'Setting up ' + agentLabel + '...';
     btn.disabled = true;
     btn.className = 'btn';
