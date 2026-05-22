@@ -1,6 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
-import { AGENT_ID, ALLOWED_CHAT_ID, agentMcpAllowlist } from './config.js';
+import { AGENT_ID, ALLOWED_CHAT_ID, agentMcpAllowlist, agentDefaultModel } from './config.js';
+import { ingestConversationTurn } from './memory-ingest.js';
 import {
   getDueTasks,
   getSession,
@@ -11,12 +12,13 @@ import {
   claimNextMissionTask,
   completeMissionTask,
   resetStuckMissionTasks,
+  getMissionTask,
 } from './db.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
-import { emitChatEvent } from './state.js';
+import { getSelectedProviderConfig } from './active-provider.js';
 
 type Sender = (text: string) => Promise<void>;
 
@@ -92,7 +94,17 @@ async function runDueTasks(): Promise<void> {
         await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
 
         // Run as a fresh agent call (no session — scheduled tasks are autonomous)
-        const result = await runAgent(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+        const result = await runAgent(
+          task.prompt,
+          undefined,
+          () => {},
+          undefined,
+          agentDefaultModel,
+          abortController,
+          undefined,
+          agentMcpAllowlist,
+          getSelectedProviderConfig(),
+        );
         clearTimeout(timeout);
 
         if (result.aborted) {
@@ -113,6 +125,15 @@ async function runDueTasks(): Promise<void> {
           logConversationTurn(ALLOWED_CHAT_ID, 'user', `[Scheduled task]: ${task.prompt}`, activeSession ?? undefined, schedulerAgentId);
           logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
         }
+
+        // Fire-and-forget memory extraction. Synthetic chat_id when this agent has no
+        // user-facing Telegram chat (specialists usually don't). Memory is valuable
+        // even on background tasks — they produce content worth remembering, just
+        // grouped under a per-agent synthetic thread instead of a real user chat.
+        const ingestChatId = ALLOWED_CHAT_ID || `scheduled-${schedulerAgentId}`;
+        void ingestConversationTurn(ingestChatId, `[Scheduled task]: ${task.prompt}`, text, schedulerAgentId).catch((err) => {
+          logger.error({ err, taskId: task.id }, 'Memory ingestion fire-and-forget failed (scheduled task)');
+        });
 
         updateTaskAfterRun(task.id, nextRun, text, 'success');
 
@@ -153,14 +174,48 @@ async function runDueMissionTasks(): Promise<void> {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), TASK_TIMEOUT_MS);
 
+    // Cross-process cancel signal: dashboard flips status to 'cancelled' in
+    // SQLite, this poll picks it up within 5s and aborts the runAgent call.
+    let cancelledByUser = false;
+    const cancelPoll = setInterval(() => {
+      const current = getMissionTask(mission.id);
+      if (current?.status === 'cancelled') {
+        cancelledByUser = true;
+        abortController.abort();
+        clearInterval(cancelPoll);
+      }
+    }, 5_000);
+
     try {
-      const result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+      const result = await runAgent(
+        mission.prompt,
+        undefined,
+        () => {},
+        undefined,
+        agentDefaultModel,
+        abortController,
+        undefined,
+        agentMcpAllowlist,
+        getSelectedProviderConfig(),
+      );
       clearTimeout(timeout);
+      clearInterval(cancelPoll);
 
       if (result.aborted) {
-        completeMissionTask(mission.id, null, 'failed', 'Timed out after 10 minutes');
-        logger.warn({ missionId: mission.id }, 'Mission task timed out');
-        try { await sender('Mission task timed out: "' + mission.title + '"'); } catch {}
+        if (cancelledByUser) {
+          // Status is already 'cancelled' from the dashboard write — leave it.
+          logger.info({ missionId: mission.id }, 'Mission task cancelled by user');
+        } else {
+          completeMissionTask(mission.id, null, 'failed', 'Timed out after 10 minutes');
+          logger.warn({ missionId: mission.id }, 'Mission task timed out');
+          try {
+            await sender('Mission task timed out: "' + mission.title + '"');
+          } catch (sendErr) {
+            // Sender can fail for Telegram API blips or chat-not-found. We
+            // still want to see it so the user isn't silently unnotified.
+            logger.warn({ err: sendErr, missionId: mission.id }, 'Failed to send mission timeout notification');
+          }
+        }
       } else {
         const text = result.text?.trim() || 'Task completed with no output.';
         completeMissionTask(mission.id, text, 'completed');
@@ -177,23 +232,27 @@ async function runDueMissionTasks(): Promise<void> {
           logConversationTurn(ALLOWED_CHAT_ID, 'user', '[Mission task: ' + mission.title + ']: ' + mission.prompt, activeSession ?? undefined, schedulerAgentId);
           logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
         }
-      }
 
-      emitChatEvent({
-        type: 'mission_update' as 'progress',
-        chatId,
-        content: JSON.stringify({
-          id: mission.id,
-          status: result.aborted ? 'failed' : 'completed',
-          title: mission.title,
-        }),
-      });
+        // Fire-and-forget memory extraction. Synthetic chat_id when this agent has no
+        // user-facing Telegram chat (specialists usually don't). Mission tasks produce
+        // content worth remembering, grouped under a per-agent synthetic thread.
+        const ingestChatId = ALLOWED_CHAT_ID || `mission-${schedulerAgentId}`;
+        void ingestConversationTurn(ingestChatId, '[Mission task: ' + mission.title + ']: ' + mission.prompt, text, schedulerAgentId).catch((err) => {
+          logger.error({ err, missionId: mission.id }, 'Memory ingestion fire-and-forget failed (mission task)');
+        });
+      }
     } catch (err) {
       clearTimeout(timeout);
+      clearInterval(cancelPoll);
       const errMsg = err instanceof Error ? err.message : String(err);
-      completeMissionTask(mission.id, null, 'failed', errMsg.slice(0, 500));
-      logger.error({ err, missionId: mission.id }, 'Mission task failed');
+      if (cancelledByUser) {
+        logger.info({ missionId: mission.id }, 'Mission task cancelled by user (threw on abort)');
+      } else {
+        completeMissionTask(mission.id, null, 'failed', errMsg.slice(0, 500));
+        logger.error({ err, missionId: mission.id }, 'Mission task failed');
+      }
     } finally {
+      clearInterval(cancelPoll);
       runningTaskIds.delete(missionKey);
     }
   });

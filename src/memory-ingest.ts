@@ -1,7 +1,11 @@
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { cosineSimilarity, embedText } from './embeddings.js';
-import { getMemoriesWithEmbeddings, saveStructuredMemory, saveMemoryEmbedding, getPreviousAssistantMessage } from './db.js';
+import { getMemoriesWithEmbeddings, saveStructuredMemory, saveStructuredMemoryAtomic, saveMemoryEmbedding, getPreviousAssistantMessage } from './db.js';
 import { logger } from './logger.js';
+import { readEnvFile } from './env.js';
+import { getScrubbedSdkEnv } from './security.js';
+import { EngineFactory } from './agent-engine/index.js';
+import { defaultModelForProvider, getSelectedProviderConfig } from './active-provider.js';
 
 /**
  * Hardline correction phrases. When a user message matches any of these,
@@ -31,6 +35,77 @@ export function matchesCorrectionPattern(text: string): boolean {
 // Callback for notifying when a high-importance memory is created.
 // Set by bot.ts to send a Telegram notification.
 let onHighImportanceMemory: ((memoryId: number, summary: string, importance: number) => void) | null = null;
+
+// Quota-aware backoff. When Gemini returns 429 RESOURCE_EXHAUSTED we
+// pause ingestion for INGEST_QUOTA_BACKOFF_MS instead of retrying on
+// every turn — otherwise the log fills with the same error and we burn
+// quota the moment it refreshes. After the window we try again; if it
+// still 429s we reset the cooldown. Surface the suspended state via
+// `getIngestionQuotaStatus` so /api/health can show "memory paused".
+const INGEST_QUOTA_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+let _ingestSuspendedUntil = 0;
+let _last429At = 0;
+
+function isQuotaError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /429|RESOURCE_EXHAUSTED|quota/i.test(msg);
+}
+
+/**
+ * Extract a memory via the selected agent provider. Used as the PRIMARY
+ * extractor — Gemini API fallback can hit 429 RESOURCE_EXHAUSTED on
+ * free-tier quota, leaving conversations with no long-term memory written.
+ *
+ * Returns the raw JSON string the model produced (or empty string on
+ * failure). Caller is responsible for parsing + validation, same as
+ * before — keeps the contract identical to generateContent().
+ */
+export async function extractViaClaude(prompt: string, timeoutMs = 15_000): Promise<string> {
+  const secrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const env = getScrubbedSdkEnv(secrets);
+  const provider = getSelectedProviderConfig();
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  let text = '';
+  try {
+    const engine = EngineFactory.forProvider(provider);
+    for await (const ev of engine.invoke({
+      prompt,
+      provider,
+      cwd: process.cwd(),
+      model: defaultModelForProvider(provider, 'claude-haiku-4-5-20251001'),
+      allowedTools: [],
+      disallowedTools: ['*'],
+      settingSources: [],
+      maxTurns: 1,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      env,
+      abortController: abort,
+    })) {
+      if (ev.type === 'result' && typeof ev.text === 'string') text = ev.text;
+    }
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : err, provider: provider.type }, 'Memory extraction via selected provider failed');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  return text;
+}
+
+export function getIngestionQuotaStatus(): {
+  suspended: boolean;
+  suspendedUntil: number | null;
+  last429At: number | null;
+} {
+  const now = Date.now();
+  return {
+    suspended: now < _ingestSuspendedUntil,
+    suspendedUntil: _ingestSuspendedUntil > now ? _ingestSuspendedUntil : null,
+    last429At: _last429At > 0 ? _last429At : null,
+  };
+}
 
 export function setHighImportanceCallback(cb: (memoryId: number, summary: string, importance: number) => void): void {
   onHighImportanceMemory = cb;
@@ -102,6 +177,11 @@ export async function ingestConversationTurn(
   // Hard filter: skip very short messages and commands
   if (userMessage.length <= 15 || userMessage.startsWith('/')) return false;
 
+  // If we recently hit a quota wall, don't even try — it'll just spam the
+  // log with the same RESOURCE_EXHAUSTED error every turn. Surface the
+  // suspended state via getIngestionQuotaStatus so /api/health can warn.
+  if (Date.now() < _ingestSuspendedUntil) return false;
+
   // Short-circuit on corrections — let ingestCorrection handle them exclusively
   // to avoid cross-extractor duplication. ingestCorrection runs in parallel
   // (see saveConversationTurn in memory.ts).
@@ -112,7 +192,18 @@ export async function ingestConversationTurn(
       .replace('{USER_MESSAGE}', userMessage.slice(0, 2000))
       .replace('{ASSISTANT_RESPONSE}', assistantResponse.slice(0, 2000));
 
-    const raw = await generateContent(prompt);
+    // Primary path: the selected provider via the agent engine. Gemini
+    // remains a fallback because its free-tier RESOURCE_EXHAUSTED errors
+    // were hitting on every turn and silently killing memory ingestion.
+    let raw: string;
+    try {
+      raw = await extractViaClaude(prompt);
+    } catch (providerErr) {
+      // Fallback: try Gemini if it has a key configured. The 429 backoff
+      // path inside the catch below handles quota errors gracefully.
+      logger.warn({ err: providerErr instanceof Error ? providerErr.message : providerErr }, 'selected-provider extraction failed; falling back to Gemini');
+      raw = await generateContent(prompt);
+    }
     const result = parseJsonResponse<ExtractionResult & { skip?: boolean }>(raw);
 
     if (!result || result.skip) return false;
@@ -155,21 +246,17 @@ export async function ingestConversationTurn(
       }
     }
 
-    const memoryId = saveStructuredMemory(
+    const memoryId = saveStructuredMemoryAtomic(
       chatId,
       userMessage,
       result.summary,
       result.entities ?? [],
       result.topics ?? [],
       importance,
+      embedding,
       'conversation',
       agentId,
     );
-
-    // Store the embedding we already generated
-    if (embedding.length > 0) {
-      saveMemoryEmbedding(memoryId, embedding);
-    }
 
     // Notify on high-importance memories so the user can pin them
     if (importance >= 0.8 && onHighImportanceMemory) {
@@ -182,7 +269,24 @@ export async function ingestConversationTurn(
     );
     return true;
   } catch (err) {
-    // Gemini failure should never block the bot
+    // Gemini failure should never block the bot.
+    // 429 / quota errors deserve a cooldown — otherwise every turn fires
+    // the same failed call and floods the log. Suspend ingestion for the
+    // configured window; subsequent calls return early until the window
+    // expires. Drop the log level on the suspension itself so we don't
+    // re-warn every time the cooldown is hit.
+    if (isQuotaError(err)) {
+      _last429At = Date.now();
+      const wasSuspended = _ingestSuspendedUntil > Date.now();
+      _ingestSuspendedUntil = Date.now() + INGEST_QUOTA_BACKOFF_MS;
+      if (!wasSuspended) {
+        logger.warn(
+          { backoffMs: INGEST_QUOTA_BACKOFF_MS },
+          'Memory ingestion quota exceeded (Gemini 429). Suspending ingestion until cooldown expires.',
+        );
+      }
+      return false;
+    }
     logger.error({ err }, 'Memory ingestion failed (Gemini)');
     return false;
   }

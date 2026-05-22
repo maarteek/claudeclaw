@@ -5,8 +5,45 @@ vi.mock('./gemini.js', () => ({
   parseJsonResponse: vi.fn(),
 }));
 
+// Mock the Claude SDK so the new Anthropic-Haiku ingestion path doesn't
+// actually try to spawn a subprocess in tests. We force it to throw so
+// the code falls back to the mocked Gemini path the existing tests
+// already exercise.
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: vi.fn(() => {
+    async function* failing(): AsyncGenerator<never> {
+      throw new Error('mocked: Claude SDK unavailable in test env');
+    }
+    return failing();
+  }),
+}));
+
+vi.mock('./security.js', () => ({
+  getScrubbedSdkEnv: vi.fn(() => ({})),
+}));
+
+vi.mock('./active-provider.js', () => ({
+  getSelectedProviderConfig: vi.fn(() => ({ type: 'claude' })),
+  defaultModelForProvider: vi.fn(() => 'claude-haiku-4-5-20251001'),
+}));
+
+vi.mock('./agent-engine/index.js', () => ({
+  EngineFactory: {
+    forProvider: vi.fn(() => ({
+      async *invoke(): AsyncGenerator<never> {
+        throw new Error('mocked: provider engine unavailable in test env');
+      },
+    })),
+  },
+}));
+
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+}));
+
 vi.mock('./db.js', () => ({
   saveStructuredMemory: vi.fn(() => 1),
+  saveStructuredMemoryAtomic: vi.fn(() => 1),
   saveMemoryEmbedding: vi.fn(),
   getMemoriesWithEmbeddings: vi.fn(() => []),
   getPreviousAssistantMessage: vi.fn(),
@@ -23,12 +60,16 @@ vi.mock('./logger.js', () => ({
 
 import { ingestConversationTurn, matchesCorrectionPattern, ingestCorrection } from './memory-ingest.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
-import { saveStructuredMemory, getMemoriesWithEmbeddings, getPreviousAssistantMessage } from './db.js';
+import { saveStructuredMemory, saveStructuredMemoryAtomic, getMemoriesWithEmbeddings, getPreviousAssistantMessage } from './db.js';
 import { cosineSimilarity } from './embeddings.js';
 
 const mockGenerateContent = vi.mocked(generateContent);
 const mockParseJson = vi.mocked(parseJsonResponse);
-const mockSave = vi.mocked(saveStructuredMemory);
+// ingestConversationTurn persists via saveStructuredMemoryAtomic; ingestCorrection
+// persists via saveStructuredMemory. Separate handles so each describe block
+// asserts against the function its own code path actually calls.
+const mockSave = vi.mocked(saveStructuredMemoryAtomic);
+const mockSaveCorrection = vi.mocked(saveStructuredMemory);
 const mockGetPrev = vi.mocked(getPreviousAssistantMessage);
 const mockGetMemoriesWithEmbeddings = vi.mocked(getMemoriesWithEmbeddings);
 const mockCosineSimilarity = vi.mocked(cosineSimilarity);
@@ -120,6 +161,7 @@ describe('ingestConversationTurn', () => {
       ['dark mode', 'UI'],
       ['preferences', 'UI'],
       0.8,
+      expect.any(Array),
       'conversation',
       'main',
     );
@@ -212,6 +254,7 @@ describe('ingestConversationTurn', () => {
       [],
       [],
       1.0,  // clamped
+      expect.any(Array),
       'conversation',
       'main',
     );
@@ -287,6 +330,7 @@ describe('ingestConversationTurn', () => {
       [],  // defaults to empty
       [],  // defaults to empty
       0.5,
+      expect.any(Array),
       'conversation',
       'main',
     );
@@ -409,8 +453,8 @@ describe('ingestCorrection', () => {
     const result = await ingestCorrection('chat-1', phrase, 'main');
 
     expect(result).toBe(true);
-    expect(mockSave).toHaveBeenCalledTimes(1);
-    const args = mockSave.mock.calls[0];
+    expect(mockSaveCorrection).toHaveBeenCalledTimes(1);
+    const args = mockSaveCorrection.mock.calls[0];
     expect(args[5]).toBe(1.0);          // importance
     expect(args[6]).toBe('correction'); // source
     expect(args[8]).toBe(1);            // pinned
@@ -424,7 +468,7 @@ describe('ingestCorrection', () => {
     const result = await ingestCorrection('chat-1', "you're wrong, Bob left ACME last year", 'main');
 
     expect(result).toBe(false);
-    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockSaveCorrection).not.toHaveBeenCalled();
   });
 
   it('skips writing if a near-duplicate memory exists (cosine sim > 0.85)', async () => {
@@ -445,7 +489,7 @@ describe('ingestCorrection', () => {
     const result = await ingestCorrection('chat-1', "you're wrong about that", 'main');
 
     expect(result).toBe(false);
-    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockSaveCorrection).not.toHaveBeenCalled();
   });
 
   it('returns false on Gemini failure (logged but non-fatal)', async () => {
@@ -455,6 +499,6 @@ describe('ingestCorrection', () => {
     const result = await ingestCorrection('chat-1', "you're wrong", 'main');
 
     expect(result).toBe(false);
-    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockSaveCorrection).not.toHaveBeenCalled();
   });
 });
