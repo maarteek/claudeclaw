@@ -1611,8 +1611,20 @@ ${lines.join('\n\n')}
     // Clear WA/Slack state and pass through to Claude
     if (state) waState.delete(chatIdStr);
     if (slkState) slackState.delete(chatIdStr);
+
+    // ── Enrich with reply-to context so Claude knows what user is replying to ──
+    let messageForClaude = text;
+    const replySource = ctx.message.reply_to_message;
+    if (replySource) {
+      const quoted = replySource.text || replySource.caption || '';
+      if (quoted) {
+        const truncated = quoted.length > 300 ? quoted.slice(0, 300) + '\u2026' : quoted;
+        messageForClaude = `[Replying to: "${truncated}"]\n${text}`;
+      }
+    }
+
     // Fire-and-forget so grammY can process /stop while agent runs
-    messageQueue.enqueue(chatIdStr, () => handleMessage(ctx, text));
+    messageQueue.enqueue(chatIdStr, () => handleMessage(ctx, messageForClaude));
   });
 
   // Voice messages — real transcription via Groq Whisper

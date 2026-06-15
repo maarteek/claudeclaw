@@ -6,6 +6,9 @@ dist/
 
 # Environment — never commit API keys
 .env
+# .env backups (contain live tokens). .env.example stays tracked.
+.env.bak*
+.env.*.bak
 
 # Runtime data — NEVER commit. Contains WhatsApp/Slack messages,
 # session tokens, conversation logs, and database files.
@@ -75,6 +78,7 @@ WARROOM_TEST_PLAN.md
 /*_TLDR.md
 /PR[0-9]*_NOTES*.md
 /PR[0-9]*_TESTING*.md
+/UPSTREAM*.md
 /docs/*-results.md
 /docs/*-smoke.md
 /docs/redteam-*.md
