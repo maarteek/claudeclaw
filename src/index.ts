@@ -394,7 +394,11 @@ async function main(): Promise<void> {
     logger.warn('ALLOWED_CHAT_ID not set — scheduler disabled (no destination for results)');
   }
 
+  // Distinguishes a deliberate SIGINT/SIGTERM (clean exit) from the poll loop
+  // ending on its own — see the guard after bot.start() below.
+  let intentionalShutdown = false;
   const shutdown = async () => {
+    intentionalShutdown = true;
     logger.info('Shutting down...');
     setTelegramConnected(false);
     releaseLock();
@@ -430,6 +434,19 @@ async function main(): Promise<void> {
       }
     },
   });
+
+  // bot.start() only resolves when polling stops. A deliberate SIGINT/SIGTERM
+  // routes through shutdown() (which sets the flag and exits 0). Reaching here
+  // with the flag unset means the grammY long-poll loop ended on its own while
+  // the dashboard server and scheduler timers kept the process alive — the
+  // exact "half-dead" failure that went undetected for two weeks (polling dead,
+  // process up, /api/health still 200). Exit non-zero so systemd's
+  // Restart=always brings the bot back within ~10s instead of hanging forever.
+  if (!intentionalShutdown) {
+    setTelegramConnected(false);
+    logger.error({ agentId: AGENT_ID }, 'Telegram polling loop exited unexpectedly; exiting for systemd restart');
+    process.exit(1);
+  }
 }
 
 main().catch((err: unknown) => {
