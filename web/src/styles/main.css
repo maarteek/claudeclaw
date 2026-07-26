@@ -365,3 +365,22 @@ input, textarea, select {
   transform-origin: top left;
   will-change: transform, opacity;
 }
+
+/* ── Touch targets ───────────────────────────────────────────────────
+   Measured on an iPhone-sized viewport: 39/41 interactive elements on
+   Mission Control were under Apple's 44px minimum, and the icon buttons
+   are ~36px square. Scoped to coarse pointers so the compact desktop
+   density is untouched; only height is forced globally, because forcing
+   width would stretch inline text buttons. Icon-only buttons (a single
+   svg child) get the square minimum via :has(). */
+@media (pointer: coarse) {
+  button,
+  [role="button"] {
+    min-height: 44px;
+  }
+
+  button:has(> svg:only-child),
+  [role="button"]:has(> svg:only-child) {
+    min-width: 44px;
+  }
+}

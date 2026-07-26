@@ -43,7 +43,10 @@ export function App() {
       )}
 
       <Sidebar />
-      <main class="flex-1 min-w-0 overflow-hidden pl-12 md:pl-0">
+      {/* pl-16 (64px) clears the fixed hamburger: left-3 (12px) plus its 44px
+          coarse-pointer minimum width = 56px. The old pl-12 (48px) let the
+          button overlap the page title on a phone. */}
+      <main class="flex-1 min-w-0 overflow-hidden pl-16 md:pl-0">
         <Switch>
           <Route path="/mission"><MissionControl /></Route>
           <Route path="/scheduled"><Scheduled /></Route>

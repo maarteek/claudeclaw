@@ -838,9 +838,12 @@ function Card({ children }: { children: any }) {
   );
 }
 
+// Stacks below md. The two-column form never had room on a phone: the hint got
+// squeezed into a sliver and ran straight through the control next to it (most
+// visibly on the Theme row). Label and hint go full width, control sits under.
 function Row({ label, hint, children }: { label: string; hint?: string; children: any }) {
   return (
-    <div class="flex items-center gap-4 py-1.5">
+    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 py-1.5">
       <div class="flex-1 min-w-0">
         <div class="text-[13px] text-[var(--color-text)]">{label}</div>
         {hint && <div class="text-[11px] text-[var(--color-text-faint)] mt-0.5">{hint}</div>}
