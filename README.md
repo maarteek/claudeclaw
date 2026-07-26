@@ -558,6 +558,7 @@ Every skill in `~/.claude/skills/` loads on every session. Call them directly (`
 | `/help` | List all available commands |
 | `/stop` | Cancel the current agent query mid-execution. works from Telegram and the dashboard |
 | `/model` | Switch Claude model for this chat when the active provider is Claude. For all providers, the dashboard Settings page is the main model picker |
+| `/effort` | Set reasoning effort for this chat when the active provider is Claude (`low`, `medium`, `high`, `max`, or `reset`). Applied as the provider's `runtimeMode`, which the agent maps to the SDK's effort setting |
 | `/provider` | Show the active provider and where its model/thinking settings are selected |
 | `/voice` | Toggle voice replies on/off for all messages. When off, voice notes still get transcribed and executed. replies just come back as text |
 | `/newchat` | Wipe the active provider session and start fresh. Use when context gets stale or the conversation window is filling up |

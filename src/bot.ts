@@ -163,6 +163,16 @@ const AVAILABLE_MODELS: Record<string, string> = {
 };
 const DEFAULT_MODEL_LABEL = 'opus';
 
+// Per-chat effort override (in-memory, resets on restart).
+// Rides the existing provider.runtimeMode knob, which agent.ts maps to the
+// SDK's effort via effortForMode(). Setting runtimeMode avoids threading a
+// 13th positional arg through runAgent/runAgentWithRetry.
+const chatEffortOverride = new Map<string, string>();
+
+// Labels accepted by /effort. effortForMode() in agent.ts also understands the
+// fast/normal/deep aliases, but we advertise the canonical four.
+const AVAILABLE_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+
 export function setMainModelOverride(model: string): void {
   if (ALLOWED_CHAT_ID) chatModelOverride.set(ALLOWED_CHAT_ID, model);
 }
@@ -558,6 +568,14 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     ? SMART_ROUTING_CHEAP_MODEL
     : (userModel ?? (provider.type === 'claude' ? DEFAULT_CLAUDE_MODEL : undefined));
 
+  // Per-chat /effort override. Applied as runtimeMode so agent.ts resolves it
+  // through the existing effortForMode() path. Claude only: ACP providers take
+  // exact runtimeMode config values, so a canonical effort label would be wrong.
+  const effortOverride = provider.type === 'claude' ? chatEffortOverride.get(chatIdStr) : undefined;
+  const providerForTurn = effortOverride
+    ? { ...provider, runtimeMode: effortOverride }
+    : provider;
+
   // Start typing immediately, then refresh on interval
   await sendTyping(ctx.api, chatId);
   const typingInterval = setInterval(
@@ -665,7 +683,7 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
       },
       MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined,
       agentMcpAllowlist,
-      provider,
+      providerForTurn,
       chatToolPolicyFor(provider),
     );
 
@@ -969,6 +987,7 @@ export function createBot(): Bot {
       '/respin — Reload recent context\n' +
       '/voice — Toggle voice mode on/off\n' +
       '/model — Switch model (opus/sonnet/haiku)\n' +
+      '/effort — Set reasoning effort (low/medium/high/max)\n' +
       '/provider — Show active provider/model source\n' +
       '/memory — View recent memories\n' +
       '/forget — Clear session\n' +
@@ -1143,6 +1162,44 @@ export function createBot(): Bot {
 
     chatModelOverride.set(chatIdStr, modelId);
     await ctx.reply(`Model changed: ${arg} (${modelId})`);
+  });
+
+  // /effort — set reasoning effort (low, medium, high, max)
+  bot.command('effort', async (ctx) => {
+    if (await replyIfLocked(ctx)) return;
+    const chatIdStr = ctx.chat!.id.toString();
+    const provider = activeProvider();
+    if (provider.type !== 'claude') {
+      await ctx.reply(`Active provider: ${getProviderDisplay(provider)}\n/effort only applies to Claude. ACP providers take exact runtimeMode values. Use npm run provider:setup or the dashboard to change them.`);
+      return;
+    }
+    const arg = ctx.match?.trim().toLowerCase();
+
+    if (!arg) {
+      const override = chatEffortOverride.get(chatIdStr);
+      const currentLabel = override
+        ? override
+        : provider.runtimeMode
+          ? `${provider.runtimeMode} (from provider config)`
+          : 'session default';
+      await ctx.reply(`Current effort: ${currentLabel}\nAvailable: ${AVAILABLE_EFFORTS.join(', ')}\n\nUsage: /effort high`);
+      return;
+    }
+
+    if (arg === 'reset' || arg === 'default') {
+      chatEffortOverride.delete(chatIdStr);
+      const fallback = provider.runtimeMode ?? 'session default';
+      await ctx.reply(`Effort reset to ${fallback}`);
+      return;
+    }
+
+    if (!(AVAILABLE_EFFORTS as readonly string[]).includes(arg)) {
+      await ctx.reply(`Unknown effort: ${arg}\nAvailable: ${AVAILABLE_EFFORTS.join(', ')}, reset`);
+      return;
+    }
+
+    chatEffortOverride.set(chatIdStr, arg);
+    await ctx.reply(`Effort changed: ${arg}`);
   });
 
   // /provider — display active provider/model source only.
