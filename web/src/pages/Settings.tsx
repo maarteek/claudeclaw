@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Check, Pipette, RotateCcw } from 'lucide-preact';
+import { Check, Copy, Pipette, RotateCcw } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { Toggle } from '@/components/Toggle';
 import { invalidateFetchCache, useFetch, type FetchState } from '@/lib/useFetch';
-import { ApiError, apiPatch, apiPost } from '@/lib/api';
+import { ApiError, apiPatch, apiPost, chatId, dashboardToken } from '@/lib/api';
 import { pushToast } from '@/lib/toasts';
 import {
   theme, themeMeta, setTheme, type ThemeName,
@@ -117,6 +117,20 @@ export function Settings() {
           </Section>
 
           <Section
+            title="Access"
+            subtitle="The API is gated on a ?token= query param. In-app navigation drops the query, so a URL copied from the address bar after clicking around will 401 on a cold load."
+          >
+            <Card>
+              <Row
+                label="Dashboard link"
+                hint="Full URL including the token, for bookmarking. Treat it as a password: it grants complete dashboard access. Rotate by changing DASHBOARD_TOKEN in .env and restarting."
+              >
+                <DashboardLinkField />
+              </Row>
+            </Card>
+          </Section>
+
+          <Section
             title="Display"
             subtitle="Per-browser display preferences. Stored in localStorage, not per-workspace."
           >
@@ -199,6 +213,55 @@ export function Settings() {
 }
 
 // ── Workspace name field ──────────────────────────────────────────────
+
+// The API gate reads the token from the query string only, and in-app
+// navigation drops the query, so after the first click the address bar is no
+// longer a source of a working URL. Rebuild the canonical entry link from the
+// token cached on load instead. Copy-only: the token is never rendered, so a
+// shoulder-surfer or a screenshot of this page does not leak it.
+function DashboardLinkField() {
+  const [copied, setCopied] = useState(false);
+
+  if (!dashboardToken) {
+    return (
+      <span class="text-xs text-[var(--color-text-faint)]">
+        No token in this session. Open the dashboard from Telegram's /dashboard link.
+      </span>
+    );
+  }
+
+  const link =
+    `${window.location.origin}/?token=${encodeURIComponent(dashboardToken)}` +
+    (chatId ? `&chatId=${encodeURIComponent(chatId)}` : '');
+
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(link);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+          pushToast({
+            tone: 'warn',
+            title: 'Link copied',
+            description: 'Contains a live token. Anywhere you paste it grants full dashboard access.',
+          });
+        } catch {
+          pushToast({
+            tone: 'error',
+            title: 'Copy failed',
+            description: 'Clipboard access was refused. It needs a secure context (https or localhost).',
+          });
+        }
+      }}
+      class="inline-flex items-center gap-1.5 text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+      <span>{copied ? 'Copied' : 'Copy link'}</span>
+    </button>
+  );
+}
 
 function WorkspaceNameField() {
   const [savedTick, setSavedTick] = useState(false);
