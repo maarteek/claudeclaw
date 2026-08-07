@@ -112,7 +112,7 @@ async function runDueTasks(): Promise<void> {
 
         if (result.aborted) {
           updateTaskAfterRun(task.id, nextRun, `Timed out after ${Math.round(TASK_TIMEOUT_MS / 60000)} minutes`, 'timeout');
-          await sender(`⏱ Task timed out after 10m: "${task.prompt.slice(0, 60)}..." — killed.`);
+          await sender(`⏱ Task timed out after ${Math.round(TASK_TIMEOUT_MS / 60000)}m: "${task.prompt.slice(0, 60)}..." — killed.`);
           logger.warn({ taskId: task.id }, 'Task timed out');
           return;
         }
