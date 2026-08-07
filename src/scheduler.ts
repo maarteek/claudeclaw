@@ -117,7 +117,21 @@ async function runDueTasks(): Promise<void> {
           return;
         }
 
-        const text = result.text?.trim() || 'Task completed with no output.';
+        // An agent that dies mid-run (turn ceiling, token exhaustion) still
+        // emits a result event — with a non-'success' stop reason and/or no
+        // text. That is a FAILURE, not "completed with no output": the
+        // pipeline may be half-done (page drafted but never published, lock
+        // still held). Silently mapping it to success is what hid a week of
+        // error_max_turns deaths in 2026-08.
+        if ((result.stopReason && result.stopReason !== 'success') || !result.text?.trim()) {
+          const reason = result.stopReason && result.stopReason !== 'success' ? result.stopReason : 'no final output';
+          updateTaskAfterRun(task.id, nextRun, `FAILED (${reason}) — agent died mid-run, work may be half-done`, 'failed');
+          await sender(`❌ Task FAILED (${reason}): "${task.prompt.slice(0, 60)}..." — agent died mid-run; work may be half-done (check drafts/locks).`);
+          logger.warn({ taskId: task.id, stopReason: result.stopReason }, 'Scheduled task ended without a completed result');
+          return;
+        }
+
+        const text = result.text.trim();
         for (const chunk of splitMessage(formatForTelegram(text))) {
           await sender(chunk);
         }
@@ -219,8 +233,19 @@ async function runDueMissionTasks(): Promise<void> {
             logger.warn({ err: sendErr, missionId: mission.id }, 'Failed to send mission timeout notification');
           }
         }
+      } else if ((result.stopReason && result.stopReason !== 'success') || !result.text?.trim()) {
+        // Same failure shape as scheduled tasks: a mid-run death still emits
+        // a result event. Do not record it as completed.
+        const reason = result.stopReason && result.stopReason !== 'success' ? result.stopReason : 'no final output';
+        completeMissionTask(mission.id, null, 'failed', `FAILED (${reason}) — agent died mid-run`);
+        logger.warn({ missionId: mission.id, stopReason: result.stopReason }, 'Mission task ended without a completed result');
+        try {
+          await sender(`❌ Mission task FAILED (${reason}): "${mission.title}" — agent died mid-run.`);
+        } catch (sendErr) {
+          logger.warn({ err: sendErr, missionId: mission.id }, 'Failed to send mission failure notification');
+        }
       } else {
-        const text = result.text?.trim() || 'Task completed with no output.';
+        const text = result.text.trim();
         completeMissionTask(mission.id, text, 'completed');
         logger.info({ missionId: mission.id }, 'Mission task completed');
 

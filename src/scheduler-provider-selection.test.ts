@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
 vi.mock('./config.js', () => ({
   AGENT_ID: 'main',
   ALLOWED_CHAT_ID: 'chat-1',
+  AGENT_TIMEOUT_MS: 600000,
   agentMcpAllowlist: ['filesystem'],
   agentDefaultModel: undefined,
   agentProvider: state.provider,

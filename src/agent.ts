@@ -153,6 +153,11 @@ export interface AgentResult {
   usage: UsageInfo | null;
   aborted?: boolean;
   toolEvents: ToolEvent[];
+  /** Provider stop reason for the final result event, e.g. 'success' or
+   *  'error_max_turns'. Callers MUST treat a non-'success' reason as a
+   *  failed run even though a result event arrived — a max-turns death
+   *  yields a result with no text, which is not a completed task. */
+  stopReason?: string;
 }
 
 function effortForMode(mode: ProviderRuntimeMode | undefined): 'low' | 'medium' | 'high' | 'max' | undefined {
@@ -239,6 +244,7 @@ export async function runAgent(
 
   let newSessionId: string | undefined;
   let resultText: string | null = null;
+  let stopReason: string | undefined;
   let usage: UsageInfo | null = null;
   let didCompact = false;
   let preCompactTokens: number | null = null;
@@ -380,6 +386,7 @@ export async function runAgent(
 
       if (event.type === 'result') {
         resultText = event.text;
+        stopReason = typeof event.stopReason === 'string' ? event.stopReason : undefined;
         if (event.usage) {
           usage = event.usage;
           logger.info(
@@ -419,7 +426,7 @@ export async function runAgent(
     clearInterval(typingInterval);
   }
 
-  return { text: resultText, newSessionId: encodeProviderSession(provider, newSessionId), usage, toolEvents };
+  return { text: resultText, newSessionId: encodeProviderSession(provider, newSessionId), usage, toolEvents, stopReason };
 }
 
 // ── Retry wrapper ─────────────────────────────────────────────────
