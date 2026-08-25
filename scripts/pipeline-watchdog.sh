@@ -11,6 +11,13 @@
 #   pipeline-watchdog.sh --dry-run    # print verdicts, never send
 #   pipeline-watchdog.sh --verbose    # print verdicts AND send real alerts
 #
+# Alerts are throttled by state transition, not sent every run. The checks run
+# every 10 minutes; resending a persistent failure each time would produce 144
+# messages/day. It alerts when the problem set CHANGES, reminds at most every
+# PIPELINE_WATCHDOG_REMIND_SECS (default 6h) while it persists, and sends one
+# all-clear on recovery. State: PIPELINE_WATCHDOG_STATE (default
+# ~/.cache/pipeline-watchdog.state); delete it to force the next run to alert.
+#
 # Exit: 0 = all healthy (or alerts sent successfully), 1 = a check failed to run.
 
 set -uo pipefail
@@ -84,13 +91,64 @@ for w in "${WATCHES[@]}"; do
   fi
 done
 
-if [ ${#alerts[@]} -eq 0 ]; then
-  exit 0   # healthy: stay completely silent, as the original task did
+# --- alert throttling -------------------------------------------------------
+# These checks run every 10 minutes, so a persistent failure must not resend on
+# every run. Without this, two long-broken pipelines produce 144 alerts/day.
+# Policy: alert when the set of problems CHANGES, remind at most every
+# REMIND_SECS while the same set persists, and send one all-clear on recovery.
+STATE_FILE="${PIPELINE_WATCHDOG_STATE:-$HOME/.cache/pipeline-watchdog.state}"
+REMIND_SECS="${PIPELINE_WATCHDOG_REMIND_SECS:-21600}"   # 6h
+
+fingerprint=""
+if [ ${#alerts[@]} -gt 0 ]; then
+  fingerprint=$(printf '%s\n' "${alerts[@]}" | sort | sha256sum | cut -d' ' -f1)
 fi
 
-msg="Pipeline watchdog: ${#alerts[@]} issue(s)"$'\n'"$(printf '  • %s\n' "${alerts[@]}")"
-if [ "$DRY_RUN" = 1 ]; then
-  echo; echo "WOULD SEND:"; echo "$msg"
+prev_fingerprint=""; prev_sent=0
+if [ -f "$STATE_FILE" ]; then
+  IFS='|' read -r prev_fingerprint prev_sent < "$STATE_FILE" || true
+fi
+case "${prev_sent:-}" in ''|*[!0-9]*) prev_sent=0 ;; esac
+
+send=0; msg=""
+if [ -z "$fingerprint" ]; then
+  if [ -n "$prev_fingerprint" ]; then
+    send=1
+    msg="Pipeline watchdog: all clear. Previously reported issues have cleared."
+    [ "$VERBOSE" = 1 ] && echo "-> recovery (was failing, now healthy)"
+  else
+    [ "$VERBOSE" = 1 ] && echo "-> silent (healthy, unchanged)"
+  fi
 else
+  msg="Pipeline watchdog: ${#alerts[@]} issue(s)"$'\n'"$(printf '  • %s\n' "${alerts[@]}")"
+  if [ "$fingerprint" != "$prev_fingerprint" ]; then
+    send=1
+    [ "$VERBOSE" = 1 ] && echo "-> sending (problem set changed)"
+  elif [ $(( now - prev_sent )) -ge "$REMIND_SECS" ]; then
+    send=1
+    msg="$msg"$'\n'"(unchanged since last alert; reminder every $((REMIND_SECS/3600))h)"
+    [ "$VERBOSE" = 1 ] && echo "-> sending (reminder interval elapsed)"
+  else
+    [ "$VERBOSE" = 1 ] && echo "-> suppressed (unchanged; next reminder in $(( (REMIND_SECS - (now - prev_sent)) / 60 ))m)"
+  fi
+fi
+
+# Dry run never sends and never mutates state.
+if [ "$DRY_RUN" = 1 ]; then
+  if [ "$send" = 1 ]; then echo; echo "WOULD SEND:"; echo "$msg"; fi
+  exit 0
+fi
+
+if [ "$send" = 1 ]; then
   "$NOTIFY" "$msg" || { echo "watchdog: notify failed" >&2; exit 1; }
 fi
+
+mkdir -p "$(dirname "$STATE_FILE")"
+if [ -z "$fingerprint" ]; then
+  rm -f "$STATE_FILE"
+elif [ "$send" = 1 ]; then
+  printf '%s|%s\n' "$fingerprint" "$now" > "$STATE_FILE"
+else
+  printf '%s|%s\n' "$fingerprint" "$prev_sent" > "$STATE_FILE"
+fi
+exit 0

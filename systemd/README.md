@@ -29,6 +29,13 @@ The four replaced tasks are `paused`, not deleted. To restore them:
       "UPDATE scheduled_tasks SET status='active' \
        WHERE id IN ('fe7c631c','4aa81724','79deed62','8bbf4a3a');"
 
+Alerts are throttled by state transition. The script runs every ten minutes, so
+resending a persistent failure on every run would produce 144 messages a day. It
+sends when the set of problems changes, reminds at most every six hours while the
+same set persists, and sends a single all-clear on recovery. State lives in
+`~/.cache/pipeline-watchdog.state`; delete that file to force the next run to
+alert. Override the interval with `PIPELINE_WATCHDOG_REMIND_SECS`.
+
 Add a new watch by appending to the `WATCHES` array in
 `scripts/pipeline-watchdog.sh`; set `max_age` from the pipeline's own
 `OnCalendar` cadence plus grace, not from how often the watchdog runs.
