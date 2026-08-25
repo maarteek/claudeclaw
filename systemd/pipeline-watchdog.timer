@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the pipeline watchdog every 10 minutes
+
+[Timer]
+# The LLM version sampled every 2h, so it could only catch a failure that
+# happened to fall in its window. At 0.04s per run this can afford 10 minutes.
+OnCalendar=*:0/10
+Persistent=true
+Unit=pipeline-watchdog.service
+
+[Install]
+WantedBy=timers.target

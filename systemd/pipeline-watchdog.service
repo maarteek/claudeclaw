@@ -1,0 +1,7 @@
+[Unit]
+Description=Pipeline watchdog (replaces the LLM health-check scheduled tasks)
+Documentation=https://github.com/maarteek/claudeclaw
+
+[Service]
+Type=oneshot
+ExecStart=/home/marty/claudeclaw/scripts/pipeline-watchdog.sh
