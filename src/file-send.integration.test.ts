@@ -7,7 +7,8 @@
  * 3. Real Telegram Bot API call to actually send a file to the chat
  *
  * The real API tests require TELEGRAM_BOT_TOKEN and ALLOWED_CHAT_ID in .env.
- * They're skipped automatically if those aren't set.
+ * They also require RUN_TELEGRAM_INTEGRATION=1, so a plain `npm test` on the
+ * live box never messages the real chat.
  */
 import fs from 'fs';
 import os from 'os';
@@ -180,11 +181,11 @@ describe('file sending: mocked Grammy context', () => {
 
 // ── Real Telegram API tests ─────────────────────────────────────────
 // These actually send a file to your Telegram chat.
-// Skipped if TELEGRAM_BOT_TOKEN or ALLOWED_CHAT_ID are not in .env.
+// Skipped unless RUN_TELEGRAM_INTEGRATION=1 and both values are in .env.
 
 describe('file sending: real Telegram API', () => {
   const { token, chatId } = loadEnv();
-  const canRunRealTests = !!(token && chatId);
+  const canRunRealTests = process.env.RUN_TELEGRAM_INTEGRATION === '1' && !!(token && chatId);
 
   // Create a real temp file for the test
   let tmpFile: string;
