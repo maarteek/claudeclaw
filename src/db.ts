@@ -773,6 +773,15 @@ export function clearSession(chatId: string, agentId = 'main'): void {
   db.prepare('DELETE FROM sessions WHERE chat_id = ? AND agent_id = ?').run(chatId, agentId);
 }
 
+/** Delete every stored session and return what was removed. Used by the nightly reset. */
+export function clearAllSessions(): Array<{ chat_id: string; agent_id: string; session_id: string; updated_at: string }> {
+  const rows = db
+    .prepare('SELECT chat_id, agent_id, session_id, updated_at FROM sessions')
+    .all() as Array<{ chat_id: string; agent_id: string; session_id: string; updated_at: string }>;
+  db.prepare('DELETE FROM sessions').run();
+  return rows;
+}
+
 // ── Memory (V2: structured with LLM extraction) ────────────────────
 
 export interface Memory {
