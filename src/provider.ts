@@ -31,8 +31,8 @@ export interface ProviderConfig {
   dangerouslySkipPermissions?: boolean;
 }
 
-export const DEFAULT_PROVIDER: ProviderConfig = { type: 'claude', model: 'claude-opus-4-6' };
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-6';
+export const DEFAULT_PROVIDER: ProviderConfig = { type: 'claude', model: 'claude-opus-5-5' };
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
 export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
 
 export function normalizeProviderConfig(input: unknown, legacyModel?: string): ProviderConfig {

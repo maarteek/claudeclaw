@@ -270,7 +270,7 @@ async function configureProvider(): Promise<SetupProviderType> {
   section('Provider');
   info('Setup configures Claude as the agent provider.');
   info('See the DISCLAIMER in README.md for ENABLE_ACP and non-Claude providers.');
-  setMainProviderConfig({ type: 'claude', model: 'claude-opus-4-6' });
+  setMainProviderConfig({ type: 'claude', model: 'claude-opus-5-5' });
   ok('Provider set to Claude');
   return 'claude';
 
@@ -307,7 +307,7 @@ async function configureProvider(): Promise<SetupProviderType> {
   }
 
   if (choice === 'claude') {
-    setMainProviderConfig({ type: 'claude', model: 'claude-opus-4-6' });
+    setMainProviderConfig({ type: 'claude', model: 'claude-opus-5-5' });
     ok('Provider set to Claude');
     return 'claude';
   }
@@ -884,9 +884,9 @@ async function main() {
     yamlLines.push('# The main agent uses TELEGRAM_BOT_TOKEN from .env (no override needed).');
     yamlLines.push('# telegram_bot_token_env: TELEGRAM_BOT_TOKEN');
     yamlLines.push('');
-    yamlLines.push('# Default model. Options: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5');
+    yamlLines.push('# Default model. Options: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5');
     yamlLines.push('# Users can override per-chat with /model in Telegram.');
-    yamlLines.push('model: claude-sonnet-4-6');
+    yamlLines.push('model: claude-sonnet-5-5');
     yamlLines.push('');
     yamlLines.push('# Obsidian integration (optional).');
     yamlLines.push('# obsidian:');

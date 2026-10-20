@@ -567,7 +567,7 @@ export async function warmupMeeting(): Promise<void> {
         prompt: 'say ok',
         provider,
         cwd: PROJECT_ROOT,
-        model: defaultModelForProvider(provider, 'claude-haiku-4-5-20251001'),
+        model: defaultModelForProvider(provider, 'claude-haiku-5-5'),
         allowedTools: [],
         disallowedTools: ['*'],
         settingSources: [],
@@ -653,7 +653,7 @@ export async function warmupAgentSDK(agentId: string): Promise<void> {
           // Lightweight model for speed when Claude is selected. For ACP
           // providers, use the selected provider/model because its adapter
           // owns the actual warmup behavior.
-          model: defaultModelForProvider(provider, 'claude-haiku-4-5-20251001'),
+          model: defaultModelForProvider(provider, 'claude-haiku-5-5'),
           allowedTools: [],
           disallowedTools: ['*'],
           settingSources: [],

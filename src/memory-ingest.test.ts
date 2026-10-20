@@ -24,7 +24,7 @@ vi.mock('./security.js', () => ({
 
 vi.mock('./active-provider.js', () => ({
   getSelectedProviderConfig: vi.fn(() => ({ type: 'claude' })),
-  defaultModelForProvider: vi.fn(() => 'claude-haiku-4-5-20251001'),
+  defaultModelForProvider: vi.fn(() => 'claude-haiku-5-5'),
 }));
 
 vi.mock('./agent-engine/index.js', () => ({

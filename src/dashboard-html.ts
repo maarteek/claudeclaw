@@ -200,9 +200,9 @@ const WARROOM_ENABLED = warroomEnabled;
       <div class="model-picker" onclick="toggleModelPicker(this)" style="display:inline-block">
         <span class="model-current" style="color:#6b7280">Set all <span style="font-size:8px;opacity:0.5">&#9662;</span></span>
         <div class="model-menu" style="display:none;right:0;left:auto">
-          <div class="model-opt" data-model="claude-opus-4-6" onclick="pickGlobalModel(this)">All Opus</div>
-          <div class="model-opt" data-model="claude-sonnet-4-6" onclick="pickGlobalModel(this)">All Sonnet</div>
-          <div class="model-opt" data-model="claude-haiku-4-5" onclick="pickGlobalModel(this)">All Haiku</div>
+          <div class="model-opt" data-model="claude-opus-5-5" onclick="pickGlobalModel(this)">All Opus</div>
+          <div class="model-opt" data-model="claude-sonnet-5-5" onclick="pickGlobalModel(this)">All Sonnet</div>
+          <div class="model-opt" data-model="claude-haiku-5-5" onclick="pickGlobalModel(this)">All Haiku</div>
         </div>
       </div>
     </div>
@@ -401,9 +401,9 @@ ${WARROOM_ENABLED ? `<div class="card" style="border:1px solid #1e3a5f">
         <div style="flex:1">
           <label class="text-xs text-gray-400 block mb-1">Model</label>
           <select id="caw-model" style="width:100%;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 10px;color:#e0e0e0;font-size:12px;outline:none">
-            <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
-            <option value="claude-opus-4-6">Opus 4.6</option>
-            <option value="claude-haiku-4-5">Haiku 4.5</option>
+            <option value="claude-sonnet-5-5" selected>Sonnet 4.6</option>
+            <option value="claude-opus-5-5">Opus 4.6</option>
+            <option value="claude-haiku-5-5">Haiku 4.5</option>
           </select>
         </div>
       </div>
@@ -1519,9 +1519,9 @@ async function loadAgents() {
       const color = AGENT_COLORS[a.id] || '#6b7280';
       const dot = a.running ? '<span style="color:#6ee7b7">\u25CF</span>' : '<span style="color:#666">\u25CB</span>';
       const statusText = a.running ? 'live' : 'off';
-      const modelOpts = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
-      const modelShort = function(m) { return {'claude-opus-4-6':'Opus','claude-sonnet-4-6':'Sonnet','claude-sonnet-4-5':'Sonnet 4.5','claude-haiku-4-5':'Haiku'}[m] || m; };
-      const currentModel = a.model || (a.id === 'main' ? 'claude-opus-4-6' : 'claude-sonnet-4-6');
+      const modelOpts = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+      const modelShort = function(m) { return {'claude-opus-5-5':'Opus','claude-sonnet-5-5':'Sonnet','claude-haiku-5-5':'Haiku'}[m] || m; };
+      const currentModel = a.model || (a.id === 'main' ? 'claude-opus-5-5' : 'claude-sonnet-5-5');
       const modelLabel = modelShort(currentModel);
       const providerType = (a.provider && a.provider.type) || 'opencode';
       const providerLabel = providerType === 'claude' ? 'Claude: ' + modelLabel : providerType === 'opencode' ? 'OpenCode' : 'ACP';
@@ -1778,10 +1778,9 @@ let cawTokenDebounce = null;
 let cawNameManuallyEdited = false;
 const CAW_FALLBACK_MODELS = {
   claude: [
-    { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-    { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
-    { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+    { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+    { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+    { id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
   ],
   opencode: [{ id: 'opencode-default', label: 'OpenCode default' }],
   acp: [{ id: 'provider-default', label: 'Provider default' }],

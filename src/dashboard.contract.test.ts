@@ -472,14 +472,14 @@ describe('PATCH /api/agents/:id/model', () => {
     const res = await app.request('/api/agents/main/model' + Q, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6' }),
+      body: JSON.stringify({ model: 'claude-sonnet-5-5' }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body).toMatchObject({
       ok: true,
       agent: 'main',
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5-5',
       restartRequired: false,
     });
   });

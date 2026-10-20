@@ -18,7 +18,7 @@ telegram_bot_token_env: MYAGENT_BOT_TOKEN
 # For Claude, use:
 # provider:
 #   type: claude
-#   model: claude-sonnet-4-6
+#   model: claude-sonnet-5-5
 provider:
   type: opencode
 

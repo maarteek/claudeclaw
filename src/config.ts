@@ -218,7 +218,7 @@ export const EMERGENCY_KILL_PHRASE =
 
 // Model fallback chain: comma-separated model IDs. When the primary model
 // fails with an overloaded/billing error, try the next model in the chain.
-// Example: "claude-sonnet-4-6,claude-haiku-4-5"
+// Example: "claude-sonnet-5-5,claude-haiku-5-5"
 export const MODEL_FALLBACK_CHAIN = (
   process.env.MODEL_FALLBACK_CHAIN || envConfig.MODEL_FALLBACK_CHAIN || ''
 ).split(',').map((s) => s.trim()).filter(Boolean);
@@ -228,7 +228,7 @@ export const MODEL_FALLBACK_CHAIN = (
 export const SMART_ROUTING_ENABLED =
   (process.env.SMART_ROUTING_ENABLED || envConfig.SMART_ROUTING_ENABLED || 'false').toLowerCase() === 'true';
 export const SMART_ROUTING_CHEAP_MODEL =
-  process.env.SMART_ROUTING_CHEAP_MODEL || envConfig.SMART_ROUTING_CHEAP_MODEL || 'claude-haiku-4-5';
+  process.env.SMART_ROUTING_CHEAP_MODEL || envConfig.SMART_ROUTING_CHEAP_MODEL || 'claude-haiku-5-5';
 
 // Cost footer on every response.
 // compact = model only, verbose = model + tokens, cost = model + $, full = everything

@@ -19,7 +19,7 @@ import { PROJECT_ROOT } from './config.js';
 import { EngineFactory } from './agent-engine/index.js';
 import { defaultModelForProvider, getSelectedProviderConfig } from './active-provider.js';
 
-const ROUTER_MODEL = 'claude-haiku-4-5-20251001';
+const ROUTER_MODEL = 'claude-haiku-5-5';
 // Budget: provider subprocess cold-start can take several seconds before
 // the first token even flows, plus classification latency. 20s covers p99
 // on a warm machine; the dashboard's progressive status bar hides this

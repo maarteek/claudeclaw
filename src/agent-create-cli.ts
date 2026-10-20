@@ -8,7 +8,7 @@
  *     --id analytics \
  *     --name "Analytics" \
  *     --description "Data analysis and reporting" \
- *     --model claude-sonnet-4-6 \
+ *     --model claude-sonnet-5-5 \
  *     --template research \
  *     --token "123456789:ABCdef..." \
  *     --activate
@@ -17,7 +17,7 @@
  *   --id          Agent ID (required, lowercase, no spaces)
  *   --name        Display name (required)
  *   --description What this agent does (required)
- *   --model       Model override (default: claude-sonnet-4-6)
+ *   --model       Model override (default: claude-sonnet-5-5)
  *   --template    Template to copy from (default: _template)
  *   --token       Telegram bot token from BotFather (required)
  *   --activate    Install launchd/systemd service and start immediately
@@ -37,7 +37,7 @@ Required:
   --token TOKEN        Telegram bot token from @BotFather
 
 Options:
-  --model MODEL        Claude model (default: claude-sonnet-4-6)
+  --model MODEL        Claude model (default: claude-sonnet-5-5)
   --template TEMPLATE  Template to clone from (default: _template)
   --activate           Install and start service after creation
   --validate           Only validate the token, then exit

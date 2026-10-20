@@ -4,7 +4,7 @@ import type { AgentTurnInput } from './agent-engine/types.js';
 const state = vi.hoisted(() => ({
   capturedInputs: [] as AgentTurnInput[],
   activeProvider: { type: 'opencode' as const },
-  mainProvider: { type: 'claude' as const, model: 'claude-opus-4-6' },
+  mainProvider: { type: 'claude' as const, model: 'claude-opus-5-5' },
 }));
 
 vi.mock('./config.js', () => ({
@@ -36,7 +36,7 @@ vi.mock('./logger.js', () => ({
 }));
 
 vi.mock('./provider.js', () => ({
-  DEFAULT_CLAUDE_MODEL: 'claude-opus-4-6',
+  DEFAULT_CLAUDE_MODEL: 'claude-opus-5-5',
   DEFAULT_CODEX_MODEL: 'gpt-5.5',
   getMainProviderConfig: vi.fn(() => state.mainProvider),
   sessionBelongsToProvider: vi.fn(() => false),
@@ -76,7 +76,7 @@ describe('runAgent provider selection', () => {
     await runAgent('direct task', undefined, () => {}, undefined, undefined, undefined, undefined, undefined, { type: 'claude' });
 
     expect(state.capturedInputs[0].provider).toEqual({ type: 'claude' });
-    expect(state.capturedInputs[0].model).toBe('claude-opus-4-6');
+    expect(state.capturedInputs[0].model).toBe('claude-opus-5-5');
   });
 
   it('forwards an explicit toolPolicy to the engine', async () => {

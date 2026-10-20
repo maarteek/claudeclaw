@@ -73,7 +73,7 @@ export async function extractViaClaude(prompt: string, timeoutMs = 15_000): Prom
       prompt,
       provider,
       cwd: process.cwd(),
-      model: defaultModelForProvider(provider, 'claude-haiku-4-5-20251001'),
+      model: defaultModelForProvider(provider, 'claude-haiku-5-5'),
       allowedTools: [],
       disallowedTools: ['*'],
       settingSources: [],

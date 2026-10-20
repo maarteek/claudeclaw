@@ -128,7 +128,7 @@ async function selectProvider(): Promise<ProviderConfig> {
   if (answer !== '1' && answer !== 'claude' && answer !== 'c') {
     console.warn(`Unknown provider "${answer}". Using Claude.`);
   }
-  return { type: 'claude', model: await ask('Claude model', 'claude-opus-4-6') };
+  return { type: 'claude', model: await ask('Claude model', 'claude-opus-5-5') };
 }
 
 function splitArgs(input: string): string[] {

@@ -138,10 +138,9 @@ import { killProcess, isProcessAlive, findProcessesByPattern } from './platform.
 import { inspectAcpProviderRuntimeOptions, type AcpProviderRuntimeOptions } from './agent-engine/acp-adapter.js';
 
 const CLAUDE_MODEL_OPTIONS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
 ];
 
 const GEMINI_MODEL_OPTIONS = [
@@ -2185,7 +2184,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const model = body?.model?.trim();
     if (!model) return c.json({ error: 'model required' }, 400);
 
-    const validModels = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
+    const validModels = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
     if (!validModels.includes(model)) return c.json({ error: `Invalid model` }, 400);
 
     const agentIds = listAgentIds();
@@ -2210,7 +2209,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     const model = body?.model?.trim();
     if (!model) return c.json({ error: 'model required' }, 400);
 
-    const validModels = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
+    const validModels = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
     if (!validModels.includes(model)) return c.json({ error: `Invalid model. Valid: ${validModels.join(', ')}` }, 400);
 
     try {

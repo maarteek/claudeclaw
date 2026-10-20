@@ -319,12 +319,12 @@ describe('runAgentWithRetry', () => {
 
     const result = await runAgentWithRetry(
       'hi', undefined, noop, undefined,
-      'claude-opus-4-6', undefined, undefined, undefined,
-      ['claude-sonnet-4-6', 'claude-haiku-4-5'], undefined, claudeProvider,
+      'claude-opus-5-5', undefined, undefined, undefined,
+      ['claude-sonnet-5-5', 'claude-haiku-5-5'], undefined, claudeProvider,
     );
 
     expect(result.text).toBe('Fallback worked');
-    expect(capturedModels[0]).toBe('claude-opus-4-6');
-    expect(capturedModels[1]).toBe('claude-sonnet-4-6');
+    expect(capturedModels[0]).toBe('claude-opus-5-5');
+    expect(capturedModels[1]).toBe('claude-sonnet-5-5');
   }, 15000);
 });

@@ -53,7 +53,7 @@ describe('setAgentDescription', () => {
       name: 'Raka',
       description: 'Old description',
       telegram_bot_token_env: 'TEST_BOT_TOKEN',
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-5-5',
     });
 
     const { setAgentDescription, loadAgentConfig } = await import('./agent-config.js');
@@ -61,7 +61,7 @@ describe('setAgentDescription', () => {
 
     const raw = yaml.load(fs.readFileSync(yamlPath, 'utf-8')) as Record<string, unknown>;
     expect(raw.description).toBe('New research librarian');
-    expect(raw.model).toBe('claude-haiku-4-5');
+    expect(raw.model).toBe('claude-haiku-5-5');
     expect(raw.name).toBe('Raka');
 
     const config = loadAgentConfig('raka');
@@ -211,7 +211,7 @@ describe('loadAgentConfig main fallback', () => {
 describe('provider config', () => {
   it('keeps legacy installs on Claude when no provider is configured', async () => {
     const { getMainProviderConfig } = await import('./provider.js');
-    expect(getMainProviderConfig()).toEqual({ type: 'claude', model: 'claude-opus-4-6' });
+    expect(getMainProviderConfig()).toEqual({ type: 'claude', model: 'claude-opus-5-5' });
   });
 
   it('maps legacy Claude model to Claude provider', async () => {
@@ -219,12 +219,12 @@ describe('provider config', () => {
       name: 'Legacy',
       description: 'old',
       telegram_bot_token_env: 'TEST_BOT_TOKEN',
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5-5',
     });
 
     const { loadAgentConfig } = await import('./agent-config.js');
     const config = loadAgentConfig('legacy');
-    expect(config.provider).toEqual({ type: 'claude', model: 'claude-sonnet-4-6' });
+    expect(config.provider).toEqual({ type: 'claude', model: 'claude-sonnet-5-5' });
   });
 
   it('loads explicit OpenCode provider without a model override', async () => {
@@ -265,7 +265,7 @@ describe('provider config', () => {
       name: 'Switcher',
       description: 'switch',
       telegram_bot_token_env: 'TEST_BOT_TOKEN',
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-5-5',
     });
 
     const { setAgentProvider, loadAgentConfig } = await import('./agent-config.js');
